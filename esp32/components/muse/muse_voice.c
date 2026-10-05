@@ -26,6 +26,7 @@
 #include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
+#include "freertos/stream_buffer.h"
 #include "sdkconfig.h"
 
 #include "muse_adpcm.h"
@@ -73,6 +74,17 @@ static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
+static volatile int s_sound = -1;   /* a muse_sound_t waiting to play, or -1 */
+static volatile int s_sound_times;
+static int16_t *volatile s_play_pcm;        /* a clip waiting to play (gadget tools) */
+static volatile size_t s_play_frames;
+static volatile int s_play_times;
+static int16_t *volatile s_cap_buf;         /* a capture waiting to be filled */
+static volatile size_t s_cap_frames, s_cap_got;
+static volatile bool s_cap_done;
+static StreamBufferHandle_t s_stream;
+static volatile bool s_stream_on, s_stream_eof;
+static volatile int s_stream_rate = 11025;
 
 /*
  * Pre-roll: while idle the mic keeps running into this ring, so a recording
@@ -339,6 +351,55 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 }
 
 static void go_idle(const char *caption);
+static void play_stream(void);
+
+#define READ_CHARS_PER_S 16      /* about 190 words a minute: a page of 250 characters stays 16 s */
+#define READ_PAGE_MIN_MS 3000
+#define READ_HOLD_MS 30000       /* the last page stays this long, or until the next press */
+
+/* Waits `ms`, or until the button goes down. Returns true on the press. */
+static bool read_wait(int ms)
+{
+    for (int t = 0; t < ms; t += 50) {
+        if (got_event(MUSE_PTT_DOWN)) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    return false;
+}
+
+/* No speech (no TTS): the reply is read on the screen instead, a page at a time at reading
+ * speed, then the last page stays up. Returns true if a press cut it short. */
+static bool read_on_screen(void)
+{
+    static char page[MUSE_CAPTION_MAX], shown[MUSE_CAPTION_MAX];
+    int cols, lines;
+    muse_state_page(&cols, &lines);
+    shown[0] = '\0';
+    for (int i = 0;; i++) {
+        const char *text = muse_hatch_turn_text(i);
+        if (!text) {
+            break;
+        }
+        size_t len = strlen(text);
+        for (size_t at = 0; at < len; at += cols > 0 ? cols : 16) {
+            if (!muse_hatch_caption_at(text, at, page, sizeof(page)) || !strcmp(page, shown)) {
+                continue;
+            }
+            if (shown[0]) {
+                int ms = (int)strlen(shown) * 1000 / READ_CHARS_PER_S;
+                if (read_wait(ms < READ_PAGE_MIN_MS ? READ_PAGE_MIN_MS : ms)) {
+                    return true;
+                }
+            }
+            strlcpy(shown, page, sizeof(shown));
+            muse_state_set_caption("%s", page);
+        }
+    }
+    return read_wait(READ_HOLD_MS);
+}
+
 
 /*
  * Plays Hatch's reply as it arrives, with its text as the caption. Returns
@@ -423,8 +484,11 @@ static bool hatch_reply(bool *delivered)
     ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total", (double)played / MUSE_AUDIO_RATE,
              (esp_timer_get_time() - t0) / 1e6);
     if (!played) {
-        /* No speech (TTS unavailable): leave the reply text up for a moment. */
-        vTaskDelay(pdMS_TO_TICKS(2500));
+        /* No speech (TTS unavailable): the screen reads it out instead. */
+        muse_state_set_mode(MUSE_MODE_SPEAKING);
+        if (read_on_screen()) {
+            return true;
+        }
     }
     return false;
 }
@@ -791,7 +855,7 @@ static void voice_task(void *arg)
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback;
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && s_sound < 0 && !s_play_pcm && !s_cap_buf && !s_stream_on;
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
@@ -821,6 +885,74 @@ static void voice_task(void *arg)
             if (s_chirp) {
                 s_chirp = false;
                 muse_audio_chirp(1);
+                pre_reset();
+            }
+            if (s_sound >= 0) {
+                int id = s_sound, times = s_sound_times;
+                s_sound = -1;
+                for (int i = 0; i < times; i++) {
+                    if (i && uxQueueMessagesWaiting(s_queue)) {
+                        break;   /* a press cuts a repeated alarm short */
+                    }
+                    muse_audio_sound((muse_sound_t)id);
+                    if (i + 1 < times) {
+                        vTaskDelay(pdMS_TO_TICKS(250));
+                    }
+                }
+                pre_reset();
+            }
+            if (s_play_pcm) {
+                int16_t *pcm = s_play_pcm;
+                size_t n = s_play_frames;
+                int times = s_play_times;
+                s_play_pcm = NULL;
+                bool was_idle = muse_state_mode(NULL) == MUSE_MODE_IDLE;
+                if (was_idle) {
+                    muse_state_set_mode(MUSE_MODE_SPEAKING);
+                }
+                bool stop = false;
+                for (int t = 0; t < times && !stop; t++) {
+                    for (size_t i = 0; i < n; i += MUSE_AUDIO_CHUNK) {
+                        if (uxQueueMessagesWaiting(s_queue)) {
+                            stop = true;   /* a press stops the clip */
+                            break;
+                        }
+                        size_t m = n - i < MUSE_AUDIO_CHUNK ? n - i : MUSE_AUDIO_CHUNK;
+                        muse_state_set_level(muse_audio_level(pcm + i, m));
+                        muse_state_set_progress((float)i / n);
+                        muse_audio_write(pcm + i, m);
+                    }
+                }
+                muse_state_set_level(0);
+                muse_state_set_progress(0);
+                if (was_idle) {
+                    go_idle("");
+                }
+                free(pcm);
+                pre_reset();
+            }
+            if (s_cap_buf) {
+                int16_t *buf = s_cap_buf;
+                size_t want = s_cap_frames, got = 0;
+                muse_state_set_mode(MUSE_MODE_LISTENING);
+                muse_state_set_caption("RECORDING");
+                while (got + MUSE_AUDIO_CHUNK <= want) {
+                    if (muse_audio_read(buf + got, MUSE_AUDIO_CHUNK) != ESP_OK) {
+                        break;
+                    }
+                    muse_state_set_level(muse_audio_level(buf + got, MUSE_AUDIO_CHUNK));
+                    muse_state_set_progress((float)got / want);
+                    got += MUSE_AUDIO_CHUNK;
+                }
+                s_cap_got = got;
+                s_cap_buf = NULL;
+                s_cap_done = true;
+                muse_state_set_level(0);
+                go_idle("");
+                pre_reset();
+            }
+            if (s_stream_on) {
+                play_stream();
                 pre_reset();
             }
             if (s_mp3test) {
@@ -914,6 +1046,188 @@ void muse_voice_request_chirp(void)
 {
     s_chirp = true;
     muse_state_nudge();
+}
+
+bool muse_voice_request_sound(int sound, int times)
+{
+    if (sound < 0 || sound >= MUSE_SOUND_COUNT || s_sound >= 0) {
+        return false;
+    }
+    s_sound_times = times < 1 ? 1 : times > 10 ? 10 : times;
+    s_sound = sound;
+    muse_state_nudge();
+    return true;
+}
+
+bool muse_voice_request_pcm(int16_t *pcm, size_t frames, int times)
+{
+    if (!pcm || !frames || s_play_pcm) {
+        return false;
+    }
+    s_play_frames = frames;
+    s_play_times = times < 1 ? 1 : times > 5 ? 5 : times;
+    s_play_pcm = pcm;
+    muse_state_nudge();
+    return true;
+}
+
+bool muse_voice_request_capture(int16_t *buf, size_t frames)
+{
+    if (!buf || frames < MUSE_AUDIO_CHUNK || s_cap_buf) {
+        return false;
+    }
+    s_cap_done = false;
+    s_cap_got = 0;
+    s_cap_frames = frames;
+    s_cap_buf = buf;
+    muse_state_nudge();
+    return true;
+}
+
+bool muse_voice_capture_done(size_t *got)
+{
+    if (got) {
+        *got = s_cap_got;
+    }
+    return s_cap_done;
+}
+
+/* ---- a live PCM stream (the serial voice link) ----------------------------- */
+
+#define STREAM_BYTES (64 * 1024)                /* about 3 s of 11025 Hz audio in PSRAM */
+#define STREAM_FIRST_WAIT_US (8LL * 1000000)    /* SHOW came, audio hasn't: give the host this long */
+#define STREAM_STALL_US (1500LL * 1000)         /* mid-utterance silence that ends it */
+
+
+typedef struct {
+    uint32_t step, pos;   /* Q16 input frames per output frame */
+    int16_t prev;
+} resamp_t;
+
+static void resamp_init(resamp_t *r, int in_rate, int out_rate)
+{
+    r->step = (uint32_t)(((uint64_t)in_rate << 16) / out_rate);
+    r->pos = 0;
+    r->prev = 0;
+}
+
+/* Linear interpolation, state across calls; out holds n * out_rate / in_rate + 2. */
+static size_t resamp(resamp_t *r, const int16_t *in, size_t n, int16_t *out)
+{
+    size_t o = 0;
+    if (!n) {
+        return 0;
+    }
+    while ((r->pos >> 16) < n) {
+        size_t i = r->pos >> 16;
+        int32_t a = i ? in[i - 1] : r->prev;
+        int32_t b = in[i];
+        out[o++] = (int16_t)(a + (((b - a) * (int32_t)(r->pos & 0xffff)) >> 16));
+        r->pos += r->step;
+    }
+    r->pos -= n << 16;
+    r->prev = in[n - 1];
+    return o;
+}
+
+bool muse_voice_stream_begin(int rate_hz)
+{
+    if (!s_stream) {
+        s_stream = xStreamBufferCreateWithCaps(STREAM_BYTES, 1, MUSE_BIG_CAPS);
+        if (!s_stream) {
+            return false;
+        }
+    }
+    if (!s_stream_on) {
+        xStreamBufferReset(s_stream);
+    }
+    s_stream_rate = rate_hz < 8000 ? 8000 : rate_hz > 48000 ? 48000 : rate_hz;
+    s_stream_eof = false;
+    s_stream_on = true;
+    muse_state_nudge();
+    return true;
+}
+
+size_t muse_voice_stream_write(const void *data, size_t bytes, int wait_ms)
+{
+    if (!s_stream || !s_stream_on) {
+        return 0;
+    }
+    return xStreamBufferSend(s_stream, data, bytes, pdMS_TO_TICKS(wait_ms));
+}
+
+size_t muse_voice_stream_free(void)
+{
+    return s_stream ? xStreamBufferSpacesAvailable(s_stream) : 0;
+}
+
+void muse_voice_stream_end(void)
+{
+    s_stream_eof = true;
+}
+
+bool muse_voice_stream_active(void)
+{
+    return s_stream_on;
+}
+
+void muse_voice_stream_show(const char *text)
+{
+    muse_state_set_asleep(false);
+    if (!s_stream_on) {
+        muse_voice_stream_begin(s_stream_rate);
+    }
+    muse_state_set_caption("%s", text);
+}
+
+/* On the voice task: plays the stream until END and empty, a stall, or a press. */
+static void play_stream(void)
+{
+    enum { IN_FRAMES = 256 };
+    static uint8_t inb[IN_FRAMES * 2 + 2];
+    static int16_t outb[IN_FRAMES * 3];   /* room for 8 kHz in, 16 kHz out */
+    resamp_t rs;
+    resamp_init(&rs, s_stream_rate, MUSE_AUDIO_RATE);
+    bool was_idle = muse_state_mode(NULL) == MUSE_MODE_IDLE;
+    if (was_idle) {
+        muse_state_set_mode(MUSE_MODE_SPEAKING);
+    }
+    int64_t start = esp_timer_get_time(), last = 0;
+    size_t carry = 0;
+    while (s_stream_on) {
+        if (uxQueueMessagesWaiting(s_queue)) {
+            xStreamBufferReset(s_stream);   /* a press cuts it off */
+            break;
+        }
+        size_t got = xStreamBufferReceive(s_stream, inb + carry, sizeof(inb) - 2 - carry, pdMS_TO_TICKS(50)) + carry;
+        if (got < 2) {
+            carry = got;
+            int64_t now = esp_timer_get_time();
+            if (s_stream_eof && xStreamBufferIsEmpty(s_stream)) {
+                break;
+            }
+            if ((last ? now - last : now - start) > (last ? STREAM_STALL_US : STREAM_FIRST_WAIT_US)) {
+                break;
+            }
+            muse_state_set_level(0);
+            continue;
+        }
+        size_t frames = got / 2;
+        size_t n = resamp(&rs, (const int16_t *)inb, frames, outb);
+        carry = got & 1;
+        if (carry) {
+            inb[0] = inb[got - 1];
+        }
+        muse_state_set_level(muse_audio_level(outb, n));
+        muse_audio_write(outb, n);
+        last = esp_timer_get_time();
+    }
+    s_stream_on = false;
+    s_stream_eof = false;
+    muse_state_set_level(0);
+    if (was_idle) {
+        go_idle("");
+    }
 }
 
 void muse_voice_request_loopback(void)

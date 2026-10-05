@@ -47,6 +47,8 @@ void muse_ui_preview_brightness(int pct);
 bool muse_ui_image_size(int *w, int *h);
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels);
 void muse_ui_image_hide(void);
+/* A picture is on the screen (until a tap, the talk button or a hide takes it down). */
+bool muse_ui_image_visible(void);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
 void muse_ui_camera_hint(bool visible);
 

@@ -52,6 +52,9 @@
 #include "vm_api.h"
 #include "vm_connect.h"
 #include "noise_control.h"
+#if CONFIG_MUSE_GADGET_TOOLS
+#include "gadget_tools.h"
+#endif
 #include "image_fetch.h"
 #include "noise_tunnel.h"
 #include "led_status.h"
@@ -1920,6 +1923,12 @@ static cJSON *on_ws_command(
         return async;
     }
 #endif
+#if CONFIG_MUSE_GADGET_TOOLS
+    {
+        cJSON *tool = gadget_tools_command(command, params, request_id, session_generation);
+        if (tool) return tool;
+    }
+#endif
 
     char msg[128];
     snprintf(msg, sizeof(msg), "unsupported command: %s", command);
@@ -2511,6 +2520,9 @@ void app_run(void) {
 
     noise_ctrl_init(identity_node_id(), identity_ble_name(), on_ws_control_status);
     noise_ctrl_set_command_cb(on_ws_command);
+#if CONFIG_MUSE_GADGET_TOOLS
+    gadget_tools_init();
+#endif
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
 

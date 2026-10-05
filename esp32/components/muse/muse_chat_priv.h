@@ -39,9 +39,12 @@ void muse_hatch_chat_connect(void);
 void muse_hatch_chat_forget(void);
 
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
-#define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
-    "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+/* The note JSON in two halves: ,"session_id":"..." goes between them for a side chat. */
+#define MUSE_HATCH_NOTE_HEAD_1 "{\"message\":\"\",\"output_modality\":\"text\""
+#define MUSE_HATCH_NOTE_HEAD_2 \
+    ",\"items\":[{\"type\":\"file\",\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\"," \
+    "\"data_base64\":\""
+#define MUSE_HATCH_NOTE_HEAD MUSE_HATCH_NOTE_HEAD_1 MUSE_HATCH_NOTE_HEAD_2
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
 
@@ -55,6 +58,8 @@ size_t muse_hatch_base64(const uint8_t *in, size_t n, char *out);
  * of wrapped lines holding byte `at` of `text` (false if there's no text). */
 void muse_hatch_tail_words(const char *src, char *out, size_t cap);
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
+/* The turn's i-th message text ("" if it has none), or NULL past the last one. */
+const char *muse_hatch_turn_text(int i);
 
 #ifdef __cplusplus
 }

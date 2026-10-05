@@ -34,6 +34,11 @@ bool muse_console_getc(uint8_t *c)
     return usb_serial_jtag_read_bytes(c, 1, portMAX_DELAY) == 1;
 }
 
+size_t muse_console_read(uint8_t *buf, size_t n, int timeout_ms)
+{
+    return usb_serial_jtag_read_bytes(buf, n, pdMS_TO_TICKS(timeout_ms));
+}
+
 void muse_console_write(const void *buf, size_t n)
 {
     usb_serial_jtag_write_bytes(buf, n, portMAX_DELAY);
@@ -139,6 +144,12 @@ bool muse_console_getc(uint8_t *c)
     }
 #endif
     return true;
+}
+
+size_t muse_console_read(uint8_t *buf, size_t n, int timeout_ms)
+{
+    int got = uart_read_bytes(PORT, buf, n, pdMS_TO_TICKS(timeout_ms));
+    return got < 0 ? 0 : (size_t)got;
 }
 
 void muse_console_write(const void *buf, size_t n)

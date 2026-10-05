@@ -43,13 +43,34 @@
 #define LIST_W 330
 #define LIST_TOP 84
 #define ROW_H 58
+#define ROW_H_NARROW 46        /* panels under 320 px wide (the Freenove 2.8" portrait): rows and fonts a size down */
 #define MAX_APS 12
 
+#if CONFIG_MUSE_SKIN_WINAMP
+/* Winamp 2.x classic skin, the way WINACYD draws it on this very panel: grey plastic body,
+ * raised bevels (light top-left, shadow bottom-right), sunken black wells, green LCD text. */
+#define SKIN_WINAMP 1
+#define WA_FACE 0x383c38
+#define WA_LIGHT 0x686c68
+#define WA_DARK 0x181c18
+#define WA_TITLE_A 0x202828
+#define WA_TITLE_B 0x484c48
+#define WA_SELECTED 0x0000c6
+#define WA_TITLEBAR_H 14
+#define WA_ROW_H 20
+#define COLOR_TEXT 0x00fc00
+#define COLOR_DIM 0x00ac00
+#define COLOR_CARD 0x000000
+#define COLOR_CARD_PRESSED WA_SELECTED
+#define COLOR_ACCENT 0xa8a8a8
+#else
+#define SKIN_WINAMP 0
 #define COLOR_TEXT 0xf2efff
 #define COLOR_DIM 0x8b84a8
 #define COLOR_CARD 0x1a1530
 #define COLOR_CARD_PRESSED 0x2e2552
 #define COLOR_ACCENT 0xa77dff
+#endif
 #define COLOR_OK 0x6ff0bf
 #define COLOR_WARN 0xffb45c
 #define COLOR_DANGER 0xff5c5c
@@ -58,6 +79,34 @@ typedef void (*text_done_cb_t)(const char *text);
 
 /* The screen size the text page is scaled to (see text_px). */
 static int s_text_scale = 466;
+static bool s_narrow;      /* width < 320: see ROW_H_NARROW */
+static const lv_font_t *font_row(void) { return SKIN_WINAMP ? &lv_font_unscii_8 : s_narrow ? &lv_font_montserrat_16 : &lv_font_montserrat_20; }
+static const lv_font_t *font_value(void) { return SKIN_WINAMP ? &lv_font_unscii_8 : s_narrow ? &lv_font_montserrat_14 : &lv_font_montserrat_16; }
+
+#if SKIN_WINAMP
+/* The Winamp bevel: one light line top and left, one dark line bottom and right; sunken swaps them. */
+static void bevel_cb(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_layer_t *layer = lv_event_get_layer(e);
+    bool sunken = lv_event_get_user_data(e) != NULL;
+    lv_area_t a;
+    lv_obj_get_coords(obj, &a);
+    lv_draw_line_dsc_t d;
+    lv_draw_line_dsc_init(&d);
+    d.width = 1;
+    d.color = lv_color_hex(sunken ? WA_DARK : WA_LIGHT);
+    d.p1.x = a.x1; d.p1.y = a.y1; d.p2.x = a.x2; d.p2.y = a.y1; lv_draw_line(layer, &d);
+    d.p1.x = a.x1; d.p1.y = a.y1; d.p2.x = a.x1; d.p2.y = a.y2; lv_draw_line(layer, &d);
+    d.color = lv_color_hex(sunken ? WA_LIGHT : WA_DARK);
+    d.p1.x = a.x1; d.p1.y = a.y2; d.p2.x = a.x2; d.p2.y = a.y2; lv_draw_line(layer, &d);
+    d.p1.x = a.x2; d.p1.y = a.y1; d.p2.x = a.x2; d.p2.y = a.y2; lv_draw_line(layer, &d);
+}
+static void bevel(lv_obj_t *obj, bool sunken)
+{
+    lv_obj_add_event_cb(obj, bevel_cb, LV_EVENT_DRAW_MAIN_END, sunken ? (void *)1 : NULL);
+}
+#endif
 static lv_obj_t *s_tile;
 static lv_obj_t *s_current;
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
@@ -141,7 +190,7 @@ static void set_text(lv_obj_t *l, const char *text)
 
 static lv_obj_t *note(lv_obj_t *list, const char *text)
 {
-    lv_obj_t *l = label(list, &lv_font_montserrat_16, COLOR_DIM, text);
+    lv_obj_t *l = label(list, font_value(), COLOR_DIM, text);
     lv_obj_set_width(l, lv_pct(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -185,7 +234,7 @@ static lv_obj_t *back_button(lv_obj_t *p)
     lv_obj_set_size(b, 56, 48);
     lv_obj_align(b, LV_ALIGN_TOP_MID, -112, 28);
     lv_obj_add_event_cb(b, on_back, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *arrow = label(b, &lv_font_montserrat_20, COLOR_ACCENT, LV_SYMBOL_LEFT);
+    lv_obj_t *arrow = label(b, font_row(), SKIN_WINAMP ? 0x000000 : COLOR_ACCENT, SKIN_WINAMP ? "<" : LV_SYMBOL_LEFT);
     lv_obj_center(arrow);
     return b;
 }
@@ -193,7 +242,7 @@ static lv_obj_t *back_button(lv_obj_t *p)
 /* A page: title, optional back arrow, and a vertically scrolling column. */
 static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **list_out)
 {
-    const bool compact = !muse_board->round && muse_board->height <= 240;
+    const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < 340);
     const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
@@ -202,6 +251,45 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
     catch_swipes(p);
 
+#if SKIN_WINAMP
+    (void)compact;
+    (void)list_top;
+    lv_obj_set_style_bg_color(p, lv_color_hex(WA_FACE), 0);
+    lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
+    bevel(p, false);
+    lv_obj_t *bar = lv_obj_create(p);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, muse_board->width - 6, WA_TITLEBAR_H);
+    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 3);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(WA_TITLE_B), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(WA_TITLE_A), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    bevel(bar, false);
+    lv_obj_t *t = label(bar, &lv_font_unscii_8, COLOR_ACCENT, title);
+    lv_obj_center(t);
+    if (back) {
+        lv_obj_t *b = lv_button_create(bar);
+        lv_obj_remove_style_all(b);
+        lv_obj_set_size(b, 24, WA_TITLEBAR_H - 2);
+        lv_obj_align(b, LV_ALIGN_LEFT_MID, 1, 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(WA_FACE), 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        bevel(b, false);
+        lv_obj_set_ext_click_area(b, 12);
+        lv_obj_add_event_cb(b, on_back, LV_EVENT_CLICKED, NULL);
+        lv_obj_center(label(b, &lv_font_unscii_8, 0x000000, "<"));
+    }
+    const int well_top = 3 + WA_TITLEBAR_H + 3;
+    lv_obj_t *list = lv_obj_create(p);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_size(list, muse_board->width - 6, muse_board->height - well_top - 3);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, well_top);
+    lv_obj_set_style_bg_color(list, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(list, 2, 0);
+    bevel(list, true);
+#else
     lv_obj_t *t = label(p, compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
     lv_obj_set_style_text_letter_space(t, compact ? 0 : 2, 0);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : 44);
@@ -218,11 +306,12 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_remove_style_all(list);
     lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W, muse_board->height - list_top);
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
+#endif
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(list, 10, 0);
+    lv_obj_set_style_pad_row(list, SKIN_WINAMP ? 0 : 10, 0);
     /* Clear the page dots on flat panels, or the bottom curve on round ones. */
-    lv_obj_set_style_pad_bottom(list, compact ? 32 : 110, 0);
+    lv_obj_set_style_pad_bottom(list, SKIN_WINAMP ? 14 : compact ? 32 : 110, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     *list_out = list;
@@ -233,15 +322,15 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
 {
     lv_obj_t *c = clickable ? lv_button_create(list) : lv_obj_create(list);
     lv_obj_remove_style_all(c);
-    lv_obj_set_size(c, lv_pct(100), ROW_H);
-    lv_obj_set_style_radius(c, 18, 0);
+    lv_obj_set_size(c, lv_pct(100), SKIN_WINAMP ? WA_ROW_H : s_narrow ? ROW_H_NARROW : ROW_H);
+    lv_obj_set_style_radius(c, SKIN_WINAMP ? 0 : s_narrow ? 12 : 18, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
-    lv_obj_set_style_pad_hor(c, 16, 0);
+    lv_obj_set_style_pad_hor(c, SKIN_WINAMP ? 4 : s_narrow ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(c, 12, 0);
+    lv_obj_set_style_pad_column(c, SKIN_WINAMP ? 6 : s_narrow ? 8 : 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -251,15 +340,15 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
                      lv_event_cb_t cb, void *user)
 {
     lv_obj_t *c = card(list, true);
-    if (icon) {
-        label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
+    if (icon && !SKIN_WINAMP) {
+        label(c, font_row(), COLOR_ACCENT, icon);
     }
-    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, font_row(), COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
     if (value_out) {
-        lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_DIM, "");
-        lv_obj_set_style_max_width(v, 130, 0);
+        lv_obj_t *v = label(c, font_value(), COLOR_DIM, "");
+        lv_obj_set_style_max_width(v, s_narrow ? 96 : 130, 0);
         lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
         *value_out = v;
     }
@@ -270,11 +359,18 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
 {
     lv_obj_t *c = card(list, false);
-    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, font_row(), COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_obj_t *sw = lv_switch_create(c);
-    lv_obj_set_size(sw, 60, 32);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
+    lv_obj_set_size(sw, SKIN_WINAMP ? 30 : s_narrow ? 48 : 60, SKIN_WINAMP ? 14 : s_narrow ? 26 : 32);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(SKIN_WINAMP ? WA_DARK : 0x3a3358), LV_PART_MAIN);
+#if SKIN_WINAMP
+    lv_obj_set_style_radius(sw, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(sw, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(sw, 0, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(WA_FACE), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(sw, -2, LV_PART_KNOB);
+#endif
     lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
@@ -287,7 +383,15 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
 {
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *l = label(b, &lv_font_montserrat_20, color, text);
+#if SKIN_WINAMP
+    lv_obj_set_style_bg_color(b, lv_color_hex(WA_FACE), 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(WA_LIGHT), LV_STATE_PRESSED);
+    bevel(b, false);
+    if (color == COLOR_TEXT || color == COLOR_ACCENT) {
+        color = 0x000000;        /* black glyphs on the grey face, as on the transport buttons */
+    }
+#endif
+    lv_obj_t *l = label(b, font_row(), color, text);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     if (label_out) {
         *label_out = l;
@@ -306,21 +410,27 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
-    lv_obj_t *v = label(c, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    label(c, font_row(), COLOR_TEXT, text);
+    lv_obj_t *v = label(c, font_row(), COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
     *value_out = v;
 
     lv_obj_t *s = lv_slider_create(c);
     lv_obj_set_width(s, lv_pct(94));
-    lv_obj_set_height(s, 12);
-    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_set_height(s, SKIN_WINAMP ? 8 : 12);
+    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, SKIN_WINAMP ? 16 : s_narrow ? 32 : 40);
     lv_slider_set_range(s, lo, hi);
     lv_slider_set_value(s, value, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s, lv_color_hex(0x2a2345), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s, lv_color_hex(COLOR_TEXT), LV_PART_KNOB);
-    lv_obj_set_style_pad_all(s, 6, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(s, lv_color_hex(SKIN_WINAMP ? 0x000000 : 0x2a2345), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s, lv_color_hex(SKIN_WINAMP ? COLOR_TEXT : COLOR_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s, lv_color_hex(SKIN_WINAMP ? WA_FACE : COLOR_TEXT), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, SKIN_WINAMP ? 3 : 6, LV_PART_KNOB);
+#if SKIN_WINAMP
+    lv_obj_set_style_radius(s, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(s, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s, 0, LV_PART_KNOB);
+    bevel(s, true);
+#endif
     lv_obj_set_ext_click_area(s, 16);
     lv_obj_add_event_cb(s, cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s, cb, LV_EVENT_RELEASED, NULL);
@@ -520,16 +630,44 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_add_flag(s_text, LV_OBJ_FLAG_HIDDEN);
     catch_swipes(s_text);
     lv_obj_t *back = back_button(s_text);
+    /* A full keyboard on a 240 px panel is 22 px per key; the twelve-key pad is what fingers can hit. */
+    const bool narrow_keys = muse_board->width < 320 && !muse_board->round;
 
     /* Between the back arrow and its mirror image. */
-    s_text_title = label(s_text, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    s_text_title = label(s_text, SKIN_WINAMP ? &lv_font_unscii_8 : &lv_font_montserrat_20, COLOR_ACCENT, "");
     lv_obj_set_width(s_text_title, 150);
     lv_obj_set_style_text_align(s_text_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_text_title, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
-    const lv_font_t *font = &lv_font_montserrat_20;
-    int h = text_px(48), border = 2;
+#if SKIN_WINAMP
+    lv_obj_set_style_bg_color(s_text, lv_color_hex(WA_FACE), 0);
+    lv_obj_set_style_bg_opa(s_text, LV_OPA_COVER, 0);
+    bevel(s_text, false);
+    lv_obj_t *bar = lv_obj_create(s_text);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, muse_board->width - 6, WA_TITLEBAR_H);
+    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 3);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(WA_TITLE_B), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(WA_TITLE_A), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    bevel(bar, false);
+    lv_obj_move_background(bar);
+    lv_obj_set_parent(s_text_title, bar);
+    lv_obj_set_width(s_text_title, muse_board->width - 70);
+    lv_obj_center(s_text_title);
+    lv_obj_set_parent(back, bar);
+    lv_obj_set_size(back, 24, WA_TITLEBAR_H - 2);
+    lv_obj_align(back, LV_ALIGN_LEFT_MID, 1, 0);
+    lv_obj_set_style_bg_color(back, lv_color_hex(WA_FACE), 0);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
+    bevel(back, false);
+    lv_obj_set_ext_click_area(back, 12);
+#endif
+
+    const lv_font_t *font = SKIN_WINAMP ? &lv_font_unscii_16 : &lv_font_montserrat_20;
+    int h = narrow_keys ? 30 : text_px(48), border = SKIN_WINAMP ? 0 : 2;
     int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
     s_text_ta = lv_textarea_create(s_text);
     lv_textarea_set_one_line(s_text_ta, true);
@@ -542,10 +680,38 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_border_color(s_text_ta, lv_color_hex(COLOR_ACCENT), 0);
     lv_obj_set_style_border_width(s_text_ta, border, 0);
     lv_obj_set_style_radius(s_text_ta, 14, 0);
-    lv_obj_set_style_text_font(s_text_ta, &lv_font_montserrat_16, LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_font(s_text_ta, SKIN_WINAMP ? &lv_font_unscii_8 : &lv_font_montserrat_16, LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
+#if SKIN_WINAMP
+    lv_obj_set_style_radius(s_text_ta, 0, 0);
+    lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_TEXT), LV_PART_CURSOR);
+    bevel(s_text_ta, true);
+#endif
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, text_y(76));
+
+    if (narrow_keys) {
+        /* Portrait, flat: title bar, the field under it, the pad over the rest. */
+        const int top = SKIN_WINAMP ? 3 + WA_TITLEBAR_H + 6 : 44;
+        lv_obj_set_width(s_text_ta, muse_board->width - 8);
+        lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, top);
+        s_text_kp = muse_keypad_create(s_text, s_text_ta, false);
+        const int kp_top = top + h + 6;
+        lv_obj_set_size(s_text_kp, muse_board->width - 6, muse_board->height - kp_top - 3);
+        lv_obj_align(s_text_kp, LV_ALIGN_TOP_MID, 0, kp_top);
+#if SKIN_WINAMP
+        lv_obj_set_style_bg_color(s_text_kp, lv_color_hex(WA_FACE), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_text_kp, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_text_kp, lv_color_hex(WA_FACE), LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(s_text_kp, lv_color_hex(WA_LIGHT), LV_PART_ITEMS | LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(s_text_kp, lv_color_hex(0x000000), LV_PART_ITEMS);
+        lv_obj_set_style_radius(s_text_kp, 0, LV_PART_ITEMS);
+        lv_obj_set_style_border_width(s_text_kp, 1, LV_PART_ITEMS);
+        lv_obj_set_style_border_color(s_text_kp, lv_color_hex(WA_DARK), LV_PART_ITEMS);
+#endif
+        lv_obj_add_event_cb(s_text_kp, on_text_ready, LV_EVENT_READY, NULL);
+        return;
+    }
 
     /* A full keyboard's keys are too small to hit on a screen under 2". */
     if (muse_board->diagonal_in >= 2.0f) {
@@ -1300,6 +1466,7 @@ void muse_settings_ui_build(lv_obj_t *tile)
     if (muse_board->round && muse_board->height < 466) {
         s_text_scale = muse_board->height;
     }
+    s_narrow = muse_board->width < 320;
     s_tile = tile;
     build_home(tile);
     show(s_home);

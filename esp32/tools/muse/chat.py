@@ -125,7 +125,14 @@ class Board:
             raise BoardError("pyserial is missing: python3 -m pip install pyserial")
         self.port = port
         try:
-            self.ser = serial.Serial(port, 115200, timeout=0.05)
+            # DTR and RTS both low from the start: on USB Serial/JTAG chips RTS high with DTR low
+            # resets the chip and DTR high with RTS low pulls BOOT (the talk button on many boards)
+            # low, and Windows toggles both when a port opens or closes.
+            self.ser = serial.Serial(None, 115200, timeout=0.05)
+            self.ser.port = port
+            self.ser.dtr = False
+            self.ser.rts = False
+            self.ser.open()
         except (serial.SerialException, OSError) as e:
             code = getattr(e, "errno", None)
             if code in (errno.EPERM, errno.EACCES, errno.EBUSY) or "Permission" in str(e) or "busy" in str(e):

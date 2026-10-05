@@ -1,0 +1,52 @@
+# Freenove ESP32-S3 Display 3.5" (FNK0104N): ESP32-S3-WROOM-1 N16R8 (16 MB flash, 8 MB octal
+# PSRAM), 3.5" 320x480 ST77922 over QSPI with its touch built in, ES8311 codec with a MEMS mic and
+# a speaker header, WS2812 status LED, BOOT button, battery sense on GPIO8. USB-C on the chip's own
+# USB Serial/JTAG. Loaded after sdkconfig.muse (16 MB partitions, MuseGadget BLE name, on-screen
+# status). Pins and parts from Freenove's own code and docs: docs.freenove.com/projects/fnk0104.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_FREENOVE_S3_35=y
+CONFIG_MUSE_DEFAULT_VOLUME=80
+# the settings pages in the Winamp 2.x idiom (WINACYD)
+CONFIG_MUSE_SKIN_WINAMP=y
+# Muse can call the gadget's own tools: screen text, sounds, timers/alarms, clock, the WS2812, status
+CONFIG_MUSE_GADGET_TOOLS=y
+CONFIG_MUSE_TOOLS_RGB_LED_GPIO=40
+CONFIG_MUSE_TOOLS_TZ="MST7MDT,M3.2.0,M11.1.0"
+# spare pins Muse may drive (verify against the header before wiring anything; proper carrier board only)
+CONFIG_MUSE_TOOLS_GPIO_ALLOW="42,45"
+# microSD slot, 4-bit SDMMC (Freenove docs chapter 6, FNK0104N)
+CONFIG_MUSE_TOOLS_SD_CLK=5
+CONFIG_MUSE_TOOLS_SD_CMD=4
+CONFIG_MUSE_TOOLS_SD_D0=6
+CONFIG_MUSE_TOOLS_SD_D1=7
+CONFIG_MUSE_TOOLS_SD_D2=2
+CONFIG_MUSE_TOOLS_SD_D3=3
+# the Pi on the USB cable speaks through the gadget (devices/SERIAL_VOICE.md)
+CONFIG_MUSE_SERIAL_VOICE=y
+# its turns go to a side chat in the app, not the main one (any UUID; "" = main chat)
+CONFIG_MUSE_CHAT_SESSION_ID="bd3e9a32-7b6d-4a46-861a-7bb3b4d41771"
+
+# BOOT confirms pairing and is push-to-talk
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 8 MB octal PSRAM: code and rodata run from it so internal RAM is left for Wi-Fi, BLE and the tunnel
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
+# the small font for captions
+CONFIG_LV_FONT_MONTSERRAT_12=y

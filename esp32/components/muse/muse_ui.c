@@ -589,7 +589,9 @@ static void set_answer(int which)
         }
     }
     if (!muse_board->round) {
-        lv_obj_set_flag(s_ring, LV_OBJ_FLAG_HIDDEN, l != NULL);   /* the reply runs past a rectangle's ring */
+        if (s_ring) {
+            lv_obj_set_flag(s_ring, LV_OBJ_FLAG_HIDDEN, l != NULL);   /* the reply runs past a rectangle's ring */
+        }
     }
     if (l) {
         lv_obj_set_size(s_reply_lbl, l->w, l->h);
@@ -793,6 +795,9 @@ static void build_screen(void)
     if (!s_small) {
         /* Progress ring around the bezel. */
         int d = (s_w < s_h ? s_w : s_h) - 8;
+        if (muse_board->avatar_px > 0 && s_canvas_px + 56 < d) {
+            d = s_canvas_px + 56;        /* the ring follows a Muse that was made smaller */
+        }
         s_ring = lv_arc_create(face);
         lv_obj_set_size(s_ring, d, d);
         lv_obj_center(s_ring);
@@ -887,6 +892,35 @@ static void build_screen(void)
         lv_obj_set_size(s_bar, 0, 3);
         lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, 0);
         lv_obj_align(s_bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        if (s_tall && s_w >= 200) {
+            /* Tall enough (240x320) for a real reply page: Muse shrinks to one art pixel per
+             * pixel at the top and the reply, in the 16 px pixel font, takes the rest. */
+            const int px = MUSE_PX_W, pitch = 16 + CAPTION_LINE_SPACE;
+            const int muse_y = 8 + px / 2, top = 8 + px + 10, bottom = s_h - 44;
+            for (int k = 0; k < 2; k++) {
+                answer_layout_t *l = &s_answers[k];
+                l->px = px;
+                l->y = muse_y - s_h / 2;
+                l->w = s_w - 12;
+                l->h = (bottom - top) / pitch * pitch;
+                l->top = top - s_h / 2;
+                l->cols = l->w / 8;
+                l->lines = l->h / pitch;
+                while ((l->cols + 1) * l->lines > MUSE_CAPTION_MAX * 2 / 3) {
+                    l->lines--;
+                }
+                l->align = LV_TEXT_ALIGN_LEFT;
+                l->hides[0] = s_state_lbl;
+                l->hides[1] = s_name_lbl;
+                l->hides[2] = s_caption_lbl;
+            }
+            s_reply_lbl = make_label(face, &lv_font_unscii_16, COLOR_CAPTION);
+            lv_obj_set_style_text_line_space(s_reply_lbl, CAPTION_LINE_SPACE, 0);
+            lv_label_set_long_mode(s_reply_lbl, LV_LABEL_LONG_MODE_WRAP);
+            lv_obj_remove_flag(s_reply_lbl, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_flag(s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
+            ESP_LOGI(TAG, "reply page: %d x %d", s_answers[0].cols, s_answers[0].lines);
+        }
         return;
     }
     /* Fixed height: a longer caption ends in dots rather than growing into the ring. */
@@ -1492,7 +1526,10 @@ esp_err_t muse_ui_start(void)
     /* The full layout assumes room for the 466 px board's header and bottom
      * captions. Short landscape panels (BOX-3) need the compact layout too. */
     bool short_landscape = s_w > s_h && s_h < 320;
-    s_small = s_h < 200 || s_w < 200 || short_landscape;
+    /* A narrow portrait panel (240x320) is too short for the full layout as well: its status
+     * rows would sit at 20 + s_dy, above the top edge. */
+    bool narrow_portrait = s_w < s_h && s_w < 320;
+    s_small = s_h < 200 || s_w < 200 || short_landscape || narrow_portrait;
     s_tall = s_small && s_h >= s_w + 64;
     /* Small screens keep room for the status line and button icons. A narrow
      * one is as wide as Muse gets, in whole pixels. */
@@ -1503,6 +1540,10 @@ esp_err_t muse_ui_start(void)
     }
     if (s_canvas_px > s_w) {
         s_canvas_px = s_w / MUSE_PX_W * MUSE_PX_W;
+    }
+    if (muse_board->avatar_px > 0 && muse_board->avatar_px < s_canvas_px) {
+        /* The board asked for a smaller Muse than the screen allows. */
+        s_canvas_px = LV_MAX(MUSE_PX_W, muse_board->avatar_px / MUSE_PX_W * MUSE_PX_W);
     }
     s_dy = (s_h - 466) / 2;
     if (!s_small && muse_board->round && s_dy < 0) {
@@ -1606,6 +1647,11 @@ bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
     }
     xSemaphoreGive(s_image_mutex);
     return true;
+}
+
+bool muse_ui_image_visible(void)
+{
+    return s_ready && s_image_buf != NULL;
 }
 
 void muse_ui_image_hide(void)

@@ -67,6 +67,8 @@ typedef struct {
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
     int frame_ms;           /* face animation period */
+    int avatar_px;          /* 0: as big as the screen allows; else Muse's size in px, rounded down to
+                             * whole art pixels (a 240-wide screen fills itself at 192; 128 leaves air) */
 
     /* Power rails, buses, expanders. Runs first. */
     esp_err_t (*init)(void);

@@ -42,6 +42,12 @@
  */
 
 #include <atomic>
+#include "sdkconfig.h"
+#ifndef CONFIG_MUSE_CHAT_SESSION_ID
+#define CONFIG_MUSE_CHAT_SESSION_ID ""
+#endif
+/* The side chat this gadget's turns go to ("" = the main chat); see Kconfig. */
+#define SIDE_CHAT (CONFIG_MUSE_CHAT_SESSION_ID[0] != '\0')
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -801,7 +807,9 @@ static bool resolve_vm(char *err, size_t err_cap)
 static bool open_subscription(void)
 {
     s_last_seq = 0;
-    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
+    /* A side chat's replies only arrive on a subscription to that chat. */
+    const char *sub_body = SIDE_CHAT ? "{\"session_id\":\"" CONFIG_MUSE_CHAT_SESSION_ID "\"}" : "{}";
+    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", sub_body,
                                 true);
     return s_conn.sub_id != 0;
 }
@@ -1117,8 +1125,11 @@ static bool open_note(void)
     if (!s_turn.chat_id) {
         return false;
     }
-    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
-    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD), sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false)) {
+    static char head[sizeof(MUSE_HATCH_NOTE_HEAD) + sizeof(",\"session_id\":\"\"") + sizeof(CONFIG_MUSE_CHAT_SESSION_ID)];
+    int n = snprintf(head, sizeof(head), MUSE_HATCH_NOTE_HEAD_1 "%s%s%s" MUSE_HATCH_NOTE_HEAD_2,
+                     SIDE_CHAT ? ",\"session_id\":\"" : "", SIDE_CHAT ? CONFIG_MUSE_CHAT_SESSION_ID : "", SIDE_CHAT ? "\"" : "");
+    s_turn.body_sent = n;
+    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(head), n, false)) {
         return false;
     }
     muse_hatch_wav_header(s_turn.note, MIC_RATE);
@@ -1173,6 +1184,9 @@ static void send_chat(const char *text, const char *modality)
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", text);
     cJSON_AddStringToObject(body, "output_modality", modality);
+    if (SIDE_CHAT) {
+        cJSON_AddStringToObject(body, "session_id", CONFIG_MUSE_CHAT_SESSION_ID);
+    }
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     size_t len = json ? strlen(json) : 0;
@@ -1384,6 +1398,12 @@ static void message_done(int i, const char *final_text)
     if (m.len && m.tts == TTS_NONE) {
         m.tts = TTS_QUEUED;
     }
+#if CONFIG_MUSE_SERIAL_VOICE
+    if (m.len && s_turn.texts) {
+        /* The serial voice link reads this and speaks it (devices/SERIAL_VOICE.md). */
+        muse_hatch_console("reply", s_turn.texts + i * TEXT_MAX, "\"msg\":%d", i);
+    }
+#endif
     ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)m.len);
 }
 
@@ -2132,6 +2152,14 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return MUSE_HATCH_EV_NONE;
 }
 
+extern "C" const char *muse_hatch_turn_text(int i)
+{
+    if (i < 0 || i >= s_turn.nmsgs || !s_turn.texts) {
+        return nullptr;
+    }
+    return s_turn.msgs[i].len ? s_turn.texts + i * TEXT_MAX : "";
+}
+
 extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
     /* The message being spoken: the last one whose speech has started. */
@@ -2166,6 +2194,61 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 extern "C" size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferReceive(s_out, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);
+}
+
+extern "C" size_t muse_hatch_mp3_decode(const uint8_t *mp3, size_t len, size_t max_frames, int16_t **pcm_out,
+                                        int *rate_out, int *channels_out)
+{
+    mp3dec_t *dec = (mp3dec_t *)psram_alloc(sizeof(mp3dec_t));
+    int16_t *pcm = (int16_t *)psram_alloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t));
+    int16_t *out = (int16_t *)psram_alloc(max_frames * sizeof(int16_t));
+    if (!dec || !pcm || !out) {
+        free(dec);
+        free(pcm);
+        free(out);
+        return 0;
+    }
+    mp3dec_init(dec);
+    resampler_t rs;
+    int rate = 0, channels = 0, frames = 0;
+    size_t off = 0, n = 0;
+    while (off < len) {
+        mp3dec_frame_info_t info;
+        int samples = mp3dec_decode_frame(dec, mp3 + off, len - off, pcm, &info);
+        if (!info.frame_bytes) {
+            break;
+        }
+        off += info.frame_bytes;
+        if (!samples) {
+            continue;
+        }
+        frames++;
+        channels = info.channels;
+        if (info.channels == 2) {
+            for (int k = 0; k < samples; k++) {
+                pcm[k] = (pcm[2 * k] + pcm[2 * k + 1]) / 2;
+            }
+        }
+        if (rate != info.hz) {
+            rate = info.hz;
+            resampler_init(&rs, info.hz, MIC_RATE);
+        }
+        if (n + (size_t)samples * MIC_RATE / rate + 2 > max_frames) {
+            break;
+        }
+        n += resample(&rs, pcm, samples, out + n);
+    }
+    free(dec);
+    free(pcm);
+    if (!frames) {
+        free(out);
+        return 0;
+    }
+    ESP_LOGI(TAG, "mp3 clip: %u bytes, %d frames at %d Hz x%d -> %.1f s", (unsigned)len, frames, rate, channels, n / (double)MIC_RATE);
+    *pcm_out = out;
+    if (rate_out) *rate_out = rate;
+    if (channels_out) *channels_out = channels;
+    return n;
 }
 
 /* Bench test: decodes the embedded test_reply.mp3 exactly as a reply is decoded. */

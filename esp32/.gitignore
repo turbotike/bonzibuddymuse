@@ -27,7 +27,9 @@ dependencies.lock
 .claude/
 
 # Your own avatar (tools/muse/AVATAR_RECIPE.md): built when present, never committed.
-components/muse/avatar/
+# the avatar's source ships with this fork (BonziBuddy); Muse's replies and backups stay out
+components/muse/avatar/*
+!components/muse/avatar/muse_pixel.c
 
 # Local debug artifacts (not tracked).
 *.log
@@ -50,3 +52,6 @@ __pycache__/
 .gradle/
 .idea/
 local.properties
+
+# the SDK token for local builds (build_freenove.ps1 appends it to the defaults)
+sdkconfig.token

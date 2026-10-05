@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "esp_check.h"
 #include "esp_codec_dev.h"
@@ -325,4 +326,84 @@ void muse_audio_chirp(int rising)
         buf[i] = (int16_t)(s * env * 7000.0f);
     }
     muse_audio_write(buf, N);
+}
+
+/* ---- synthesised sounds ------------------------------------------------- */
+
+/* A note from f0 to f1 Hz over `ms` at `amp` (0..1), chunked through
+ * muse_audio_write: a 5 % attack, then a ring-down (percussive) or a hold with
+ * a short release. f0 == 0 is a rest. The 3rd harmonic matches the chirps. */
+static void tone(float f0, float f1, int ms, float amp, bool ring)
+{
+    static int16_t buf[MUSE_AUDIO_CHUNK];
+    int n = MUSE_AUDIO_RATE * ms / 1000;
+    float phase = 0;
+    for (int i = 0; i < n; i += MUSE_AUDIO_CHUNK) {
+        int m = n - i < MUSE_AUDIO_CHUNK ? n - i : MUSE_AUDIO_CHUNK;
+        for (int j = 0; j < m; j++) {
+            float x = (float)(i + j) / n;
+            float f = f0 + (f1 - f0) * x;
+            phase += 2.0f * (float)M_PI * f / MUSE_AUDIO_RATE;
+            if (phase > 2.0f * (float)M_PI) {
+                phase -= 2.0f * (float)M_PI;
+            }
+            float env = x < 0.05f ? x / 0.05f : ring ? (1.0f - x) * (1.0f - x) : x > 0.9f ? (1.0f - x) / 0.1f : 1.0f;
+            float s = f0 > 0 ? sinf(phase) + 0.3f * sinf(3.0f * phase) : 0.0f;
+            buf[j] = (int16_t)(s * env * amp * 9000.0f);
+        }
+        muse_audio_write(buf, m);
+    }
+}
+
+typedef struct {
+    short hz, hz2, ms;
+    unsigned char amp10;   /* tenths */
+    unsigned char ring;
+} note_t;
+
+static const note_t CHIME[] = { { 880, 880, 120, 8, 1 }, { 1320, 1320, 240, 8, 1 } };
+static const note_t BEEP[] = { { 1000, 1000, 150, 8, 0 } };
+static const note_t SUCCESS[] = { { 660, 660, 90, 7, 0 }, { 880, 880, 90, 7, 0 }, { 1320, 1320, 200, 7, 1 } };
+static const note_t ERROR_[] = { { 440, 440, 160, 7, 0 }, { 0, 0, 40, 0, 0 }, { 330, 330, 280, 7, 1 } };
+static const note_t ALARM[] = { { 1600, 1600, 110, 9, 0 }, { 0, 0, 90, 0, 0 }, { 1600, 1600, 110, 9, 0 },
+                                { 0, 0, 90, 0, 0 },        { 1600, 1600, 110, 9, 0 }, { 0, 0, 350, 0, 0 } };
+static const note_t DOORBELL[] = { { 659, 659, 380, 8, 1 }, { 523, 523, 650, 8, 1 } };
+static const note_t TICK[] = { { 2000, 2000, 25, 6, 0 } };
+static const note_t SIREN[] = { { 600, 1200, 450, 8, 0 }, { 1200, 600, 450, 8, 0 } };
+
+static const struct {
+    const char *name;
+    const note_t *notes;
+    int n;
+} SOUNDS[MUSE_SOUND_COUNT] = {
+    [MUSE_SOUND_CHIME] = { "chime", CHIME, 2 },       [MUSE_SOUND_BEEP] = { "beep", BEEP, 1 },
+    [MUSE_SOUND_SUCCESS] = { "success", SUCCESS, 3 }, [MUSE_SOUND_ERROR] = { "error", ERROR_, 3 },
+    [MUSE_SOUND_ALARM] = { "alarm", ALARM, 6 },       [MUSE_SOUND_DOORBELL] = { "doorbell", DOORBELL, 2 },
+    [MUSE_SOUND_TICK] = { "tick", TICK, 1 },          [MUSE_SOUND_SIREN] = { "siren", SIREN, 2 },
+};
+
+void muse_audio_sound(muse_sound_t id)
+{
+    if (id < 0 || id >= MUSE_SOUND_COUNT || !s_open) {
+        return;
+    }
+    for (int i = 0; i < SOUNDS[id].n; i++) {
+        const note_t *k = &SOUNDS[id].notes[i];
+        tone(k->hz, k->hz2, k->ms, k->amp10 / 10.0f, k->ring);
+    }
+}
+
+const char *muse_sound_name(muse_sound_t id)
+{
+    return id >= 0 && id < MUSE_SOUND_COUNT ? SOUNDS[id].name : "?";
+}
+
+int muse_sound_by_name(const char *name)
+{
+    for (int i = 0; name && i < MUSE_SOUND_COUNT; i++) {
+        if (!strcasecmp(name, SOUNDS[i].name)) {
+            return i;
+        }
+    }
+    return -1;
 }

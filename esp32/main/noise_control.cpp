@@ -41,6 +41,9 @@ extern "C" {
 #include "cJSON.h"
 #include "led_status.h"
 #include "ota.h"
+#if CONFIG_MUSE_GADGET_TOOLS
+#include "gadget_tools.h"
+#endif
 #if CONFIG_MUSE_ENABLED
 extern "C" {
 #include "muse_state.h"
@@ -1392,6 +1395,9 @@ static char *build_register_json(void) {
                     ota_required, ota_optional);
     }
 
+#if CONFIG_MUSE_GADGET_TOOLS
+    gadget_tools_add_commands(commands);
+#endif
     cJSON_AddItemToObject(params, "commands_v2", commands);
     cJSON_AddItemToObject(root, "params", params);
 
@@ -1400,8 +1406,13 @@ static char *build_register_json(void) {
     // heap. Right after the handshake there is often not that much, so print
     // into one buffer sized to fit instead.
     char *json = nullptr;
-    for (int size = 2048; size <= 8192 && !json; size += 512) {
+    for (int size = 2048; size <= 32768 && !json; size += 1024) {
+#if CONFIG_SPIRAM
+        json = (char *)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!json) json = (char *)malloc(size);
+#else
         json = (char *)malloc(size);
+#endif
         if (!json) break;
         if (!cJSON_PrintPreallocated(root, json, size, false)) {
             free(json);
@@ -1409,6 +1420,7 @@ static char *build_register_json(void) {
         }
     }
     cJSON_Delete(root);
+    if (json) ESP_LOGI(TAG, "link.register: %u bytes", (unsigned)strlen(json));
     return json;
 }
 

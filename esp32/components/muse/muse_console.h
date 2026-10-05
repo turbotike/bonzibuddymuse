@@ -34,5 +34,7 @@ esp_err_t muse_console_install(size_t rx_buf);
 /* Blocks for the next byte; false on a driver error. */
 bool muse_console_getc(uint8_t *c);
 void muse_console_write(const void *buf, size_t n);
+/* Up to n bytes, waiting at most timeout_ms for the first; what arrived. */
+size_t muse_console_read(uint8_t *buf, size_t n, int timeout_ms);
 /* A USB host is reading the port. A UART bridge can't tell: false. */
 bool muse_console_host(void);

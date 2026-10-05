@@ -37,6 +37,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_adpcm.c"
         "muse_settings.c"
         "muse_settings_ui.c"
+        "muse_prompt.c"
         "muse_text.c"
         "muse_keypad.c"
         "muse_lv_mem.c"
@@ -83,6 +84,10 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3)
         list(APPEND srcs "boards/board_m5stack_cores3.c")
+    elseif(CONFIG_MUSE_BOARD_FREENOVE_S3_28)
+        list(APPEND srcs "boards/board_freenove_s3_28.c")
+    elseif(CONFIG_MUSE_BOARD_FREENOVE_S3_35)
+        list(APPEND srcs "boards/board_freenove_s3_35.c" "boards/touch_freenove35.c")
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/

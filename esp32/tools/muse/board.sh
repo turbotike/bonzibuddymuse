@@ -38,6 +38,8 @@ case $board in
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
+    freenove28) profile=freenove-s3-28;  target=esp32s3 ;;
+    freenove35) profile=freenove-s3-35;  target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     *) echo "unknown board $board"; exit 2 ;;

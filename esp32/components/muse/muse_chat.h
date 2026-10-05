@@ -105,12 +105,19 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
  * page. False until there's reply text to page.
  */
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
+/* The turn's i-th message text ("" if it has none), or NULL past the last one; and the caption
+ * page of `text` around byte `at`, wrapped to the page muse_state_set_page() set. */
+const char *muse_hatch_turn_text(int i);
+bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
 
 /* Reply speech as 16 kHz mono. Waits up to wait_ms for some; returns frames read. */
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);
 
 /* Bench test: decodes a built-in MP3 to 16 kHz; caller frees *pcm. Returns frames. */
 size_t muse_hatch_mp3_selftest(int16_t **pcm);
+/* Decodes a whole MP3 to 16 kHz mono PCM in a new PSRAM buffer (free() it), at most max_frames.
+ * Returns the frames, 0 if it isn't an MP3; rate/channels report the source. */
+size_t muse_hatch_mp3_decode(const uint8_t *mp3, size_t len, size_t max_frames, int16_t **pcm_out, int *rate, int *channels);
 
 /*
  * As muse_hatch_turn_audio, for a note recorded before the turn began: takes

@@ -60,3 +60,19 @@ float muse_audio_level(const int16_t *mono, size_t frames);
 
 /* Short UI chirp: rising for "go", falling for "done". */
 void muse_audio_chirp(int rising);
+
+/* Short synthesised sounds (gadget tools' sound.play, timers). Plays one through muse_audio_write. */
+typedef enum {
+    MUSE_SOUND_CHIME,
+    MUSE_SOUND_BEEP,
+    MUSE_SOUND_SUCCESS,
+    MUSE_SOUND_ERROR,
+    MUSE_SOUND_ALARM,
+    MUSE_SOUND_DOORBELL,
+    MUSE_SOUND_TICK,
+    MUSE_SOUND_SIREN,
+    MUSE_SOUND_COUNT,
+} muse_sound_t;
+void muse_audio_sound(muse_sound_t id);
+const char *muse_sound_name(muse_sound_t id);
+int muse_sound_by_name(const char *name);   /* -1 if unknown */

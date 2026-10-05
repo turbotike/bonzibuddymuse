@@ -70,6 +70,12 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_CORES3
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_FREENOVE_S3_28
+            bool "Freenove ESP32-S3 Display 2.8 (FNK0104, 240x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_FREENOVE_S3_35
+            bool "Freenove ESP32-S3 Display 3.5 (FNK0104N, 320x480 QSPI touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -91,6 +97,8 @@ menu "Muse"
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "freenove_s3_28" if MUSE_BOARD_FREENOVE_S3_28
+        default "freenove_s3_35" if MUSE_BOARD_FREENOVE_S3_35
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
@@ -115,6 +123,107 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_SKIN_WINAMP
+        bool "Winamp 2.x look for the settings pages"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Grey plastic body, raised bevels, sunken black wells and green
+            LCD text in the 8 px pixel font, the way a classic Winamp skin
+            draws its playlist editor. Made for small flat panels.
+
+    config MUSE_CHAT_SESSION_ID
+        string "Side chat for this gadget's turns (a UUID; empty = the main chat)"
+        depends on MUSE_ENABLED
+        default ""
+        help
+            Sent as "session_id" with every turn, the way the Linux SDK's
+            send-user-msg --session-id does: an id Muse hasn't seen starts a
+            side chat in the app and the gadget's turns stay there, out of
+            your main chat. Any UUID will do (python -c "import uuid;
+            print(uuid.uuid4())"). Empty posts to the main chat as before.
+
+    config MUSE_GADGET_TOOLS
+        bool "Gadget tools Muse can call: screen text, sounds, timers, alarms, clock, light, status"
+        depends on MUSE_ENABLED && MUSE_HATCH
+        default n
+        help
+            Offers Muse what the board can do on its own as Home Link
+            commands (main/gadget_tools.c): a message on the screen, a
+            synthesised chime or alarm, countdowns and clock alarms that
+            show while they run, local time over SNTP, the RGB light,
+            the room's sound level, settings and a status report.
+
+    config MUSE_TOOLS_RGB_LED_GPIO
+        int "WS2812 RGB LED GPIO for light.set (-1: none)"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_TZ
+        string "POSIX TZ string for the clock and alarms"
+        depends on MUSE_GADGET_TOOLS
+        default "UTC0"
+        help
+            For example MST7MDT,M3.2.0,M11.1.0 (Mountain), EST5EDT,M3.2.0,M11.1.0
+            (Eastern), GMT0BST,M3.5.0/1,M10.5.0 (UK), CET-1CEST,M3.5.0,M10.5.0/3.
+
+    config MUSE_TOOLS_GPIO_ALLOW
+        string "GPIO pins Muse may drive or read (comma separated; empty: no gpio.* commands)"
+        depends on MUSE_GADGET_TOOLS
+        default ""
+        help
+            Only these pins are accepted by gpio.set / gpio.pulse / gpio.read. List
+            the spare header pins of the board, never ones the display, codec,
+            card or button use. Anything wired to them belongs on a proper board.
+
+    config MUSE_TOOLS_SD_CLK
+        int "microSD CLK GPIO (-1: no card slot)"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_SD_CMD
+        int "microSD CMD GPIO"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_SD_D0
+        int "microSD D0 GPIO"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_SD_D1
+        int "microSD D1 GPIO (-1: 1-bit mode)"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_SD_D2
+        int "microSD D2 GPIO"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_TOOLS_SD_D3
+        int "microSD D3 GPIO"
+        depends on MUSE_GADGET_TOOLS
+        range -1 48
+        default -1
+
+    config MUSE_SERIAL_VOICE
+        bool "Serial voice link: a host on the USB cable speaks through the gadget"
+        depends on MUSE_ENABLED && MUSE_HATCH
+        default n
+        help
+            devices/SERIAL_VOICE.md. The console accepts SHOW <text>, RATE <hz>,
+            SAY <n> (then READY, then n bytes of s16le mono PCM) and END, plays
+            the PCM through the speaker with the speaking face, and writes every
+            reply's text as an @chat frame of type "reply" so the host can
+            synthesise it. For a Raspberry Pi running a local voice engine.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

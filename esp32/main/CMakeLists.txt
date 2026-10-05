@@ -67,6 +67,13 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
+    # gadget_tools.c (CONFIG_MUSE_GADGET_TOOLS): the RGB light and the chip thermometer
+    led_strip
+    esp_driver_tsens
+    fatfs
+    sdmmc
+    esp_driver_sdmmc
+    vfs
 )
 
 # E-paper has its own status screen in place of led_status.c.
@@ -79,6 +86,10 @@ endif()
 
 if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
+endif()
+
+if(CONFIG_MUSE_GADGET_TOOLS)
+    list(APPEND GADGET_SRCS "gadget_tools.c" "gadget_canvas.c" "gadget_more.c")
 endif()
 
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING)

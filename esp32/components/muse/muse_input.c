@@ -63,7 +63,11 @@ static const char *TAG = "muse_input";
 #define LONG_TICKS 150         /* 1.5 s: power off */
 #define SLEEP_CHECK_MS 100
 
+#if CONFIG_MUSE_SERIAL_VOICE
+#define SERIAL_RX 4096         /* PCM arrives at 22 KB/s between reads */
+#else
 #define SERIAL_RX 1024         /* the driver drops what doesn't fit, so a console line must */
+#endif
 #define SERIAL_LINE 1024
 #define CHAT_MAX (192 * 1024)  /* a typed message, assembled from "chat+=" lines */
 
@@ -632,6 +636,98 @@ static bool console_command(char *line, bool whole)
 #endif
 }
 
+#if CONFIG_MUSE_SERIAL_VOICE
+/*
+ * The serial voice link (devices/SERIAL_VOICE.md). A host on the USB cable
+ * sends, each as a line:
+ *   SHOW <text>   the caption for what it is about to say
+ *   RATE <hz>     the PCM's sample rate (default 11025)
+ *   SAY <n>       then waits for "READY", then sends n bytes of s16le mono PCM
+ *   END           the utterance is over; the face goes idle once it has played
+ * serial_task keys on the first byte: 'S', 'R' or 'E'.
+ */
+#define VOICE_LINE 320
+#define VOICE_CHUNK 1024
+#define VOICE_MAX_SAY (1024 * 1024)
+#define VOICE_READY_WAIT_MS 10000
+#define VOICE_DATA_WAIT_MS 3000
+static int s_voice_rate = 11025;
+
+static void voice_reply(const char *line)
+{
+    muse_console_write(line, strlen(line));
+}
+
+static void voice_say(size_t n)
+{
+    if (!muse_voice_stream_active() && !muse_voice_stream_begin(s_voice_rate)) {
+        voice_reply("ERR no stream\n");
+        return;
+    }
+    /* Room for the whole chunk before asking for it, so the host never stalls mid-chunk. */
+    int waited = 0;
+    while (muse_voice_stream_free() < n && waited < VOICE_READY_WAIT_MS) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        waited += 20;
+    }
+    if (muse_voice_stream_free() < n) {
+        voice_reply("ERR buffer full\n");
+        return;
+    }
+    voice_reply("READY\n");
+    static uint8_t buf[VOICE_CHUNK];
+    size_t got = 0;
+    int idle_ms = 0;
+    while (got < n) {
+        size_t want = n - got < sizeof(buf) ? n - got : sizeof(buf);
+        size_t r = muse_console_read(buf, want, 100);
+        if (!r) {
+            idle_ms += 100;
+            if (idle_ms >= VOICE_DATA_WAIT_MS) {
+                voice_reply("ERR timeout\n");
+                return;
+            }
+            continue;
+        }
+        idle_ms = 0;
+        got += r;
+        muse_voice_stream_write(buf, r, 1000);
+    }
+}
+
+static void voice_command(uint8_t first)
+{
+    char line[VOICE_LINE];
+    line[0] = (char)first;
+    read_line(line + 1, sizeof(line) - 1);
+    if (!strncmp(line, "SHOW ", 5)) {
+        muse_voice_stream_show(line + 5);
+        voice_reply("OK\n");
+    } else if (!strncmp(line, "SAY ", 4)) {
+        char *end;
+        long n = strtol(line + 4, &end, 10);
+        if (n <= 0 || n > VOICE_MAX_SAY || (n & 1) || *end) {
+            voice_reply("ERR bad SAY\n");
+        } else {
+            voice_say((size_t)n);
+        }
+    } else if (!strncmp(line, "RATE ", 5)) {
+        int r = atoi(line + 5);
+        if (r >= 8000 && r <= 48000) {
+            s_voice_rate = r;
+            voice_reply("OK\n");
+        } else {
+            voice_reply("ERR bad RATE\n");
+        }
+    } else if (!strcmp(line, "END")) {
+        muse_voice_stream_end();
+        voice_reply("OK\n");
+    } else {
+        voice_reply("ERR unknown\n");
+    }
+}
+#endif
+
 /*
  * Bench testing over the USB cable: 'd' / 'u' act as the talk button going
  * down / up, so the voice path can be driven without a finger on the button;
@@ -675,6 +771,10 @@ static void serial_task(void *arg)
         } else if (c == 'd' || c == 'u') {
             muse_state_poke();
             post(c == 'd' ? MUSE_PTT_DOWN : MUSE_PTT_UP, false);
+#if CONFIG_MUSE_SERIAL_VOICE
+        } else if (c == 'S' || c == 'R' || c == 'E') {
+            voice_command(c);
+#endif
         }
     }
 }
