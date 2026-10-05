@@ -43,3 +43,18 @@ and `board_freenove_s3_28.c` (ILI9341, FT6336U).
 
 Serial console gotcha on Windows: open the port with DTR and RTS low before
 the first byte or the chip resets (tools/muse/chat.py does this).
+
+## Gotchas learned the hard way
+
+- The ST77922 (3.5") only accepts flush windows whose x start is a multiple of
+  4 and whose x end is 4n+3. Anything else draws as noise. The board driver
+  registers an LVGL rounder (LV_EVENT_INVALIDATE_AREA) that widens every area;
+  keep it if you touch the display code.
+- Freenove's own ST77922 init table is sent verbatim as the vendor init; the
+  driver warns that 3Ah and 36h get overwritten by it, which is intended.
+- On Windows, opening the USB serial port with DTR high resets the chip and
+  DTR high with RTS low holds BOOT (download mode). Open with both low.
+- After editing a Kconfig, run a reconfigure before the build; the generated
+  sdkconfig does not pick up new symbols on its own.
+- The 320x480 panel uses the same compact Winamp layouts as the 240x320 one:
+  the thresholds in muse_ui.c and muse_settings_ui.c are `width < 340`.

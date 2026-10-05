@@ -1528,7 +1528,7 @@ esp_err_t muse_ui_start(void)
     bool short_landscape = s_w > s_h && s_h < 320;
     /* A narrow portrait panel (240x320) is too short for the full layout as well: its status
      * rows would sit at 20 + s_dy, above the top edge. */
-    bool narrow_portrait = s_w < s_h && s_w < 320;
+    bool narrow_portrait = s_w < s_h && s_w < 340;   /* 240x320 and 320x480 alike */
     s_small = s_h < 200 || s_w < 200 || short_landscape || narrow_portrait;
     s_tall = s_small && s_h >= s_w + 64;
     /* Small screens keep room for the status line and button icons. A narrow

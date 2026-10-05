@@ -174,6 +174,18 @@ static esp_err_t init(void)
     return adc_oneshot_config_channel(s_adc, BATT_ADC, &ch_cfg);
 }
 
+/* The ST77922 only takes column windows that start on a multiple of 4 and end on 4n+3 (the
+ * component's README): anything else draws as noise. Widen every invalidated area to fit. */
+static void round_area(lv_event_t *e)
+{
+    lv_area_t *a = lv_event_get_param(e);
+    a->x1 &= ~3;
+    a->x2 |= 3;
+    if (a->x2 >= LCD_H_RES) {
+        a->x2 = LCD_H_RES - 1;
+    }
+}
+
 static lv_display_t *display_start(lv_indev_t **touch)
 {
     const ledc_timer_config_t bl_timer = {
@@ -246,6 +258,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (!disp) {
         return NULL;
     }
+    lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
 
     /* The panel's own touch controller on the shared I2C bus; portrait 320x480 like the panel. */
     esp_lcd_panel_io_handle_t tp_io;
@@ -411,6 +424,7 @@ static const muse_board_t s_board = {
     .talk_button = "boot",
     .talk_hint = { LV_ALIGN_BOTTOM_LEFT, 8, -6 },
     .frame_ms = 40,
+    .avatar_px = 256,                   /* four art pixels per pixel; a 320 px Muse (the whole width) drew as noise */
     .init = init,
     .display_start = display_start,
     .display_lock = display_lock,

@@ -631,7 +631,7 @@ static void build_text_page(lv_obj_t *tile)
     catch_swipes(s_text);
     lv_obj_t *back = back_button(s_text);
     /* A full keyboard on a 240 px panel is 22 px per key; the twelve-key pad is what fingers can hit. */
-    const bool narrow_keys = muse_board->width < 320 && !muse_board->round;
+    const bool narrow_keys = muse_board->width < 340 && !muse_board->round;
 
     /* Between the back arrow and its mirror image. */
     s_text_title = label(s_text, SKIN_WINAMP ? &lv_font_unscii_8 : &lv_font_montserrat_20, COLOR_ACCENT, "");
@@ -1466,7 +1466,7 @@ void muse_settings_ui_build(lv_obj_t *tile)
     if (muse_board->round && muse_board->height < 466) {
         s_text_scale = muse_board->height;
     }
-    s_narrow = muse_board->width < 320;
+    s_narrow = muse_board->width < 340;
     s_tile = tile;
     build_home(tile);
     show(s_home);
