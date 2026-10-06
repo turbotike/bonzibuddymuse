@@ -27,6 +27,7 @@
 #include "sdkconfig.h"
 
 #include "muse_board.h"
+#include "muse_chat.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
 
@@ -43,6 +44,7 @@ static const char *TAG = "voice_link";
 static volatile int s_client = -1;
 static SemaphoreHandle_t s_send_lock;
 static int s_rate = 11025;
+static bool s_authed;   /* AUTH <key> seen on this connection (or no key configured) */
 
 static void reply(int fd, const char *line)
 {
@@ -145,6 +147,25 @@ static bool command(int fd, char *line)
         reply(fd, "OK\n");
     } else if (!strcmp(line, "PING")) {
         reply(fd, "PONG\n");
+    } else if (!strncmp(line, "AUTH ", 5)) {
+        s_authed = CONFIG_MUSE_VOICE_LINK_KEY[0] == '\0' || !strcmp(line + 5, CONFIG_MUSE_VOICE_LINK_KEY);
+        reply(fd, s_authed ? "OK\n" : "ERR bad key\n");
+    } else if (!strncmp(line, "CHAT ", 5)) {
+        /* A typed turn, as the USB console's ">chat=" does; the reply comes back as @chat frames. */
+        if (!s_authed) {
+            reply(fd, "ERR AUTH first\n");
+        } else if (!muse_hatch_ready()) {
+            reply(fd, "ERR Muse not reachable\n");
+        } else {
+            char *text = strdup(line + 5);
+            if (text) {
+                muse_hatch_unescape(text);
+                muse_hatch_text_turn(text);   /* frees it */
+                reply(fd, "OK\n");
+            } else {
+                reply(fd, "ERR no memory\n");
+            }
+        }
     } else if (line[0]) {
         reply(fd, "ERR unknown\n");
     }
@@ -252,6 +273,7 @@ static void link_task(void *arg)
         inet_ntoa_r(peer.sin_addr, who, sizeof(who));
         ESP_LOGI(TAG, "client %s connected", who);
         s_client = fd;
+        s_authed = CONFIG_MUSE_VOICE_LINK_KEY[0] == '\0';
         serve(fd);
         s_client = -1;
         muse_voice_stream_end();

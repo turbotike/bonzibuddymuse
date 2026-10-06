@@ -231,6 +231,11 @@ menu "Muse"
         range 1024 65535
         default 7343
 
+    config MUSE_VOICE_LINK_KEY
+        string "Key a network client must send (AUTH <key>) before CHAT; empty: no key"
+        depends on MUSE_SERIAL_VOICE
+        default ""
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED

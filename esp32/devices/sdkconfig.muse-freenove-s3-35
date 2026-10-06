@@ -23,6 +23,8 @@ CONFIG_MUSE_TOOLS_SD_D2=2
 CONFIG_MUSE_TOOLS_SD_D3=3
 # the Pi on the USB cable speaks through the gadget (devices/SERIAL_VOICE.md)
 CONFIG_MUSE_SERIAL_VOICE=y
+# a network client says AUTH <key> before it may CHAT (typed turns to Muse over Wi-Fi)
+CONFIG_MUSE_VOICE_LINK_KEY="bonzi-7343"
 # its turns go to a side chat in the app, not the main one (any UUID; "" = main chat)
 CONFIG_MUSE_CHAT_SESSION_ID="bd3e9a32-7b6d-4a46-861a-7bb3b4d41771"
 

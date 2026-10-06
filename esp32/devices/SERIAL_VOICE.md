@@ -112,6 +112,15 @@ f.write(pcm)
 f.write(b"END\n"); f.readline()
 ```
 
+### Talking to Muse over the link
+
+A network client can also type to Muse: send `AUTH <key>` (the key is
+`CONFIG_MUSE_VOICE_LINK_KEY`; `bonzi-7343` on Mat's 3.5"), get `OK`, then
+`CHAT <text>` (one line; `\n` for a newline) and `OK`. The answer streams back
+as `@chat` frames of type `text`, `final` and `message_done`, exactly as the
+USB console gives them. A `CHAT` turn is typed, so it does not produce `reply`
+frames and the daemon does not speak it.
+
 ## Firmware updates without a cable
 
 Muse's `device.ota` command takes an **https** URL of a `muse-gadget.bin` and
