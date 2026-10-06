@@ -236,6 +236,11 @@ menu "Muse"
         depends on MUSE_SERIAL_VOICE
         default ""
 
+    config MUSE_AVATAR_FULL_REDRAW
+        bool "Redraw the whole avatar every frame (sprite avatars, not drawn in 64x64 cells)"
+        depends on MUSE_ENABLED
+        default n
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED

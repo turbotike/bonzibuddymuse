@@ -277,8 +277,15 @@ static void muse_image_init(void)
     lv_image_decoder_set_close_cb(dec, muse_dec_close);
     dec->name = "muse";
 
+#if CONFIG_MUSE_AVATAR_FULL_REDRAW
+    /* A sprite avatar is not drawn in 64x64 cells: the per-cell change check would miss its
+     * one-pixel moves and leave stale slivers, so the whole canvas is redrawn every frame. */
+    s_cells = NULL;
+    s_cell_row = NULL;
+#else
     s_cells = heap_caps_malloc(MUSE_PX_W * MUSE_PX_H * sizeof(uint16_t), MUSE_BIG_CAPS);
     s_cell_row = heap_caps_malloc(MUSE_PIXEL_MAX_PX * sizeof(uint16_t), MUSE_BIG_CAPS);
+#endif
     if (!s_cells || !s_cell_row) {
         free(s_cells);
         free(s_cell_row);

@@ -194,17 +194,19 @@ void muse_pixel_render(const muse_pose_t *p)
 void muse_pixel_set_size(int px)
 {
     s_size = px < MAP_MAX ? px : MAP_MAX;
-    /* The sprite fills the canvas height; its width keeps the 100:122 shape, centred. */
-    float k = (float)s_size / SPR_H;
-    int w = (int)(SPR_W * k + 0.5f);
-    int x0 = (s_size - w) / 2;
+    /* Whole screen pixels per sprite pixel so every pixel is the same size (2x on a 256 px canvas),
+     * centred; a canvas smaller than the sprite falls back to fitting the height. */
+    int k = s_size / SPR_H;
+    float kf = k >= 1 ? (float)k : (float)s_size / SPR_H;
+    int w = (int)(SPR_W * kf + 0.5f), h = (int)(SPR_H * kf + 0.5f);
+    int x0 = (s_size - w) / 2, y0 = (s_size - h) / 2;
     for (int x = 0; x < s_size; x++) {
-        int sx = (int)((x - x0) / k);
+        int sx = (int)((x - x0) / kf);
         s_xmap[x] = (int16_t)(x < x0 || sx < 0 || sx >= SPR_W ? -1 : sx);
     }
     for (int y = 0; y < s_size; y++) {
-        int sy = (int)(y / k);
-        s_ymap[y] = (int16_t)(sy < 0 || sy >= SPR_H ? -1 : sy);
+        int sy = (int)((y - y0) / kf);
+        s_ymap[y] = (int16_t)(y < y0 || sy < 0 || sy >= SPR_H ? -1 : sy);
     }
 }
 

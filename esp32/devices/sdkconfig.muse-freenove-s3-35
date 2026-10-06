@@ -8,6 +8,8 @@ CONFIG_MUSE_BOARD_FREENOVE_S3_35=y
 CONFIG_MUSE_DEFAULT_VOLUME=80
 # the settings pages in the Winamp 2.x idiom (WINACYD)
 CONFIG_MUSE_SKIN_WINAMP=y
+# the avatar is BonziBuddy's real sprite frames (tools/muse/sprite_avatar.py), not cell art
+CONFIG_MUSE_AVATAR_FULL_REDRAW=y
 # Muse can call the gadget's own tools: screen text, sounds, timers/alarms, clock, the WS2812, status
 CONFIG_MUSE_GADGET_TOOLS=y
 CONFIG_MUSE_TOOLS_RGB_LED_GPIO=40
