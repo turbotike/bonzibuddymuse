@@ -33,7 +33,12 @@ import serial
 
 SCALE = 3
 port, keys, out = sys.argv[1], sys.argv[2], sys.argv[3]
-s = serial.Serial(port, 115200, timeout=0.2)
+# DTR and RTS low before opening: on USB Serial/JTAG chips Windows' default (DTR high) resets the board
+s = serial.Serial(None, 115200, timeout=0.2)
+s.port = port
+s.dtr = False
+s.rts = False
+s.open()
 
 
 def rd(t, *until):

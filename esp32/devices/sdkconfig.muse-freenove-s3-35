@@ -52,5 +52,7 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 
+# screenshots over the console ('p' / tools/muse/snap.py), for checking the avatar from the PC
+CONFIG_LV_USE_SNAPSHOT=y
 # the small font for captions
 CONFIG_LV_FONT_MONTSERRAT_12=y
