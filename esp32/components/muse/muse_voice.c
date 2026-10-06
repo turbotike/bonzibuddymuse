@@ -355,6 +355,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 
 static void go_idle(const char *caption);
 static void play_stream(void);
+static void pump_stream(void);
 
 /* The Pi's voice daemon is connected: it speaks the replies, so Muse's own audio is dropped. */
 static bool link_client(void)
@@ -479,6 +480,9 @@ static bool hatch_reply(bool *delivered)
             return true;
         }
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
+        if (mute && s_stream_on) {
+            pump_stream();   /* Bonzi's voice, as it arrives */
+        }
         if (n && mute) {
             played += n;   /* the Pi's voice speaks this reply; Muse's own audio is dropped */
         } else if (n) {
@@ -1202,6 +1206,32 @@ void muse_voice_stream_show(const char *text)
     muse_state_set_caption("%s", text);
 }
 
+/* One slice of the stream, from inside a reply that the Pi is voicing: plays what has arrived
+ * so Bonzi starts talking while Muse's own (muted) reply is still coming in. */
+static resamp_t s_pump_rs;
+static int s_pump_rate;
+static void pump_stream(void)
+{
+    static int16_t in[256], out[256 * 3];
+    if (!s_stream) {
+        return;
+    }
+    if (s_pump_rate != s_stream_rate) {
+        resamp_init(&s_pump_rs, s_stream_rate, MUSE_AUDIO_RATE);
+        s_pump_rate = s_stream_rate;
+    }
+    size_t got = xStreamBufferReceive(s_stream, in, sizeof(in), 0);
+    if (got < 2) {
+        return;
+    }
+    if (muse_state_mode(NULL) != MUSE_MODE_SPEAKING) {
+        muse_state_set_mode(MUSE_MODE_SPEAKING);
+    }
+    size_t n = resamp(&s_pump_rs, in, got / 2, out);
+    muse_state_set_level(muse_audio_level(out, n));
+    muse_audio_write(out, n);
+}
+
 /* On the voice task: plays the stream until END and empty, a stall, or a press. */
 static void play_stream(void)
 {
@@ -1210,6 +1240,7 @@ static void play_stream(void)
     static int16_t outb[IN_FRAMES * 3];   /* room for 8 kHz in, 16 kHz out */
     resamp_t rs;
     resamp_init(&rs, s_stream_rate, MUSE_AUDIO_RATE);
+    s_pump_rate = 0;
     bool was_idle = muse_state_mode(NULL) == MUSE_MODE_IDLE;
     if (was_idle) {
         muse_state_set_mode(MUSE_MODE_SPEAKING);
