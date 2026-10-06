@@ -38,6 +38,9 @@
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_SERIAL_VOICE
+#include "muse_voice_link.h"
+#endif
 
 static const char *TAG = "muse_voice";
 
@@ -353,6 +356,16 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 static void go_idle(const char *caption);
 static void play_stream(void);
 
+/* The Pi's voice daemon is connected: it speaks the replies, so Muse's own audio is dropped. */
+static bool link_client(void)
+{
+#if CONFIG_MUSE_SERIAL_VOICE
+    return muse_voice_link_connected();
+#else
+    return false;
+#endif
+}
+
 #define READ_CHARS_PER_S 16      /* about 190 words a minute: a page of 250 characters stays 16 s */
 #define READ_PAGE_MIN_MS 3000
 #define READ_HOLD_MS 30000       /* the last page stays this long, or until the next press */
@@ -363,6 +376,9 @@ static bool read_wait(int ms)
     for (int t = 0; t < ms; t += 50) {
         if (got_event(MUSE_PTT_DOWN)) {
             return true;
+        }
+        if (s_stream_on) {
+            return false;   /* the Pi is about to speak: the page can go */
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -384,6 +400,9 @@ static bool read_on_screen(void)
         }
         size_t len = strlen(text);
         for (size_t at = 0; at < len; at += cols > 0 ? cols : 16) {
+            if (s_stream_on) {
+                return false;
+            }
             if (!muse_hatch_caption_at(text, at, page, sizeof(page)) || !strcmp(page, shown)) {
                 continue;
             }
@@ -416,6 +435,7 @@ static bool hatch_reply(bool *delivered)
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
     int64_t t0 = esp_timer_get_time();
+    bool mute = link_client();
     *delivered = false;
     for (;;) {
         muse_hatch_ev_t ev;
@@ -459,7 +479,9 @@ static bool hatch_reply(bool *delivered)
             return true;
         }
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
-        if (n) {
+        if (n && mute) {
+            played += n;   /* the Pi's voice speaks this reply; Muse's own audio is dropped */
+        } else if (n) {
             if (!speaking) {
                 speaking = true;
                 muse_state_set_mode(MUSE_MODE_SPEAKING);
@@ -476,7 +498,7 @@ static bool hatch_reply(bool *delivered)
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
         }
         /* The page being said, or before the speech the reply's opening page. */
-        if ((speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
+        if (!mute && (speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
             muse_state_set_caption("%s", page);
         }
     }

@@ -269,6 +269,13 @@ static void link_task(void *arg)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         struct timeval stv = { .tv_sec = 2 };
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &stv, sizeof(stv));
+        /* A client that vanishes without closing (the Pi losing power) would otherwise hold the
+         * link forever and queue the next one behind it: keepalive drops it within half a minute. */
+        int ka_idle = 10, ka_intvl = 5, ka_cnt = 3;
+        setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &ka_idle, sizeof(ka_idle));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &ka_intvl, sizeof(ka_intvl));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &ka_cnt, sizeof(ka_cnt));
         char who[16];
         inet_ntoa_r(peer.sin_addr, who, sizeof(who));
         ESP_LOGI(TAG, "client %s connected", who);
@@ -280,6 +287,11 @@ static void link_task(void *arg)
         close(fd);
         ESP_LOGI(TAG, "client %s gone", who);
     }
+}
+
+bool muse_voice_link_connected(void)
+{
+    return s_client >= 0;
 }
 
 void muse_voice_link_start(void)

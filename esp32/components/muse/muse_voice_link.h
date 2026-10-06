@@ -21,6 +21,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -28,6 +29,9 @@ extern "C" {
 #endif
 
 void muse_voice_link_start(void);
+
+/* A network client is connected (the Pi's daemon): it speaks the replies, so the board doesn't. */
+bool muse_voice_link_connected(void);
 
 /* A console frame (one line, "\n" included) for the connected client, if any. */
 void muse_voice_link_console_line(const char *line, size_t n);
