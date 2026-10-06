@@ -17,6 +17,10 @@
 /* Shared by both chat backends: the voice note's encoding, and reply and
  * transcript text cut to fit the caption. Also the serial console's "@chat"
  * lines for typed turns. */
+#include "sdkconfig.h"
+#if CONFIG_MUSE_SERIAL_VOICE
+#include "muse_voice_link.h"
+#endif
 #include "muse_chat_priv.h"
 
 #include <stdarg.h>
@@ -242,6 +246,9 @@ void muse_hatch_console(const char *type, const char *text, const char *fields, 
         line[n++] = '\n';
         fwrite(line, 1, n, stdout);
         fflush(stdout);
+#if CONFIG_MUSE_SERIAL_VOICE
+        muse_voice_link_console_line(line, n);
+#endif
     } while (text && *text);
 }
 

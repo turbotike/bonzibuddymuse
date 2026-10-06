@@ -81,6 +81,45 @@ setting as you like it. Timers, menus and messages from the Home Link
 commands keep working; a `SHOW` caption is shown on the reply page like a
 `screen.show_text` message and is cleared when the stream ends.
 
+## Over the network
+
+No cable needed: the gadget listens on **TCP port 7343** (CONFIG_MUSE_VOICE_LINK_PORT)
+on your Wi-Fi and speaks exactly the same protocol. Connect, read the greeting
+line `HELLO muse-voice 1 <board name>`, then send `RATE`, `SHOW`, `SAY` (wait for
+`READY`, send the bytes) and `END` as above. Replies are the same lines. `PING`
+answers `PONG`. One client at a time; the gadget drops the stream if the client
+goes away.
+
+The console's `@chat` frames, including the `reply` frames with the text to
+speak, are sent on the same socket, so the network client needs nothing from
+the USB port at all.
+
+To find the gadget, listen on **UDP port 7343**: while no client is connected
+it broadcasts `MUSEVOICE <ip> 7343 <board name>` every 5 seconds. Or ask Muse
+for `gadget.status`, which includes the Wi-Fi IP.
+
+```python
+import socket, json
+s = socket.create_connection(("192.168.1.108", 7343))
+f = s.makefile("rwb", buffering=0)
+print(f.readline())              # HELLO ...
+f.write(b"RATE 11025\n"); f.readline()
+f.write(b"SHOW Hello\n"); f.readline()
+pcm = open("hello.raw", "rb").read()   # s16le mono 11025 Hz
+f.write(b"SAY %d\n" % len(pcm))
+assert f.readline().strip() == b"READY"
+f.write(pcm)
+f.write(b"END\n"); f.readline()
+```
+
+## Firmware updates without a cable
+
+Muse's `device.ota` command takes an **https** URL of a `muse-gadget.bin` and
+flashes it over the air, then reboots; pairing and Wi-Fi survive. A GitHub
+release asset of this repository is a fine place to put a build. Plain
+`http://` is refused by the OTA client, so a local web server on the Pi would
+need a certificate; use GitHub.
+
 ## Flashing from the Pi
 
 ```sh

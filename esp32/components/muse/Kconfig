@@ -225,6 +225,12 @@ menu "Muse"
             reply's text as an @chat frame of type "reply" so the host can
             synthesise it. For a Raspberry Pi running a local voice engine.
 
+    config MUSE_VOICE_LINK_PORT
+        int "TCP/UDP port of the voice link over Wi-Fi"
+        depends on MUSE_SERIAL_VOICE
+        range 1024 65535
+        default 7343
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED
