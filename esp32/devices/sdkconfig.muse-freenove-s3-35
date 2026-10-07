@@ -12,6 +12,9 @@ CONFIG_MUSE_SKIN_WINAMP=y
 CONFIG_MUSE_AVATAR_FULL_REDRAW=y
 # Muse can call the gadget's own tools: screen text, sounds, timers/alarms, clock, the WS2812, status
 CONFIG_MUSE_GADGET_TOOLS=y
+# the pet lives here: its life on the board, Muse as its spirit (pet.* commands)
+CONFIG_MUSE_PET=y
+CONFIG_MUSE_PET_REPORT_MIN=90
 CONFIG_MUSE_TOOLS_RGB_LED_GPIO=40
 CONFIG_MUSE_TOOLS_TZ="MST7MDT,M3.2.0,M11.1.0"
 # spare pins Muse may drive (verify against the header before wiring anything; proper carrier board only)
@@ -56,3 +59,6 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 CONFIG_LV_USE_SNAPSHOT=y
 # the small font for captions
 CONFIG_LV_FONT_MONTSERRAT_12=y
+# sockets: Home Link WebSocket + tunnel, chat subscribe, a chat POST per turn, SNTP, mDNS,
+# discovery UDP, the voice link (listener + client + beacon): 10 ran out
+CONFIG_LWIP_MAX_SOCKETS=16

@@ -155,6 +155,22 @@ menu "Muse"
             show while they run, local time over SNTP, the RGB light,
             the room's sound level, settings and a status report.
 
+    config MUSE_PET
+        bool "The pet: a creature that lives on the gadget, with Muse as its spirit"
+        depends on MUSE_GADGET_TOOLS
+        default n
+        help
+            A virtual pet (components/muse/pet.c) drawn by the avatar renderer
+            from its genome: needs, sleep, growth through stages, sickness, all
+            on the board and saved in NVS. Muse gets reports and speaks for it
+            through the pet.* commands (main/gadget_pet.c).
+
+    config MUSE_PET_REPORT_MIN
+        int "Minutes between the pet's routine reports to Muse (0: only events)"
+        depends on MUSE_PET
+        range 0 1440
+        default 90
+
     config MUSE_TOOLS_RGB_LED_GPIO
         int "WS2812 RGB LED GPIO for light.set (-1: none)"
         depends on MUSE_GADGET_TOOLS

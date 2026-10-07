@@ -1,5 +1,13 @@
 # BonziBuddy Muse gadget
 
+> **2026-10-06: the gadget is now a pet.** The Pi voice (TruVoice) and the
+> Bonzi sprites are retired: Meta's SDK does not speak gadget replies by
+> itself, so the voice only ever came through the Pi, and the Pi's link to the
+> board kept dying. The board now raises a creature of its own with Muse as
+> its spirit; see [PET.md](PET.md). Everything below still describes the
+> build, the board port and the tools, which the pet is built on. The Bonzi
+> avatar is kept as `esp32/components/muse/avatar/muse_pixel.c.bonzi`.
+
 Mat's fork of Meta's Muse Gadget SDK for the Freenove ESP32-S3 Display boards
 (2.8" FNK0104AB and 3.5" FNK0104N): the stock Muse gadget plus
 

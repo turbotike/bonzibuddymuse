@@ -25,6 +25,9 @@
  */
 #include "gadget_tools.h"
 #include "gadget_more.h"
+#if CONFIG_MUSE_PET
+#include "gadget_pet.h"
+#endif
 
 #include <ctype.h>
 #include <dirent.h>
@@ -2734,6 +2737,9 @@ void gadget_tools_add_commands(cJSON *commands)
                 "Everything about the gadget right now: uptime, power and battery, Wi-Fi, free memory, chip temperature, "
                 "what the screen is doing, settings, running timers, the light, the SD card, the clock.", NULL, NULL, 0);
     gadget_more_add_commands(commands);
+#if CONFIG_MUSE_PET
+    gadget_pet_add_commands(commands);
+#endif
 }
 
 cJSON *gadget_tools_command(const char *command, cJSON *params, const char *request_id,
@@ -2779,6 +2785,12 @@ cJSON *gadget_tools_command(const char *command, cJSON *params, const char *requ
     if (!strcmp(command, "gadget.sleep")) return cmd_sleep(params);
     if (!strcmp(command, "gadget.configure")) return cmd_configure(params);
     if (!strcmp(command, "gadget.status")) return cmd_status();
+#if CONFIG_MUSE_PET
+    cJSON *pet = gadget_pet_command(command, params, request_id, gen);
+    if (pet) {
+        return pet;
+    }
+#endif
     return gadget_more_command(command, params, request_id, gen);
 }
 
@@ -2812,6 +2824,9 @@ void gadget_tools_init(void)
     const esp_timer_create_args_t args = { .callback = tick_cb, .name = "gadget_tick" };
     ESP_ERROR_CHECK(esp_timer_create(&args, &tick));
     gadget_more_init();
+#if CONFIG_MUSE_PET
+    gadget_pet_init();
+#endif
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick, 1000000));
     ESP_LOGI(TAG, "ready: tz %s, light %s, sd %s, gpio pins %d", CONFIG_MUSE_TOOLS_TZ, HAVE_LIGHT ? "yes" : "no",
              HAVE_SD ? "configured" : "no", s_gpio_allow_n);

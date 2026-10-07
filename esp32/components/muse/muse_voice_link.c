@@ -228,14 +228,26 @@ static void beacon(void)
     close(fd);
 }
 
+/* Logs a socket failure, at most once in 10 s per place, so a wedged link says why. */
+static void complain(const char *what, int err, int64_t *last_ms)
+{
+    int64_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    if (now - *last_ms >= 10000) {
+        ESP_LOGW(TAG, "%s failed: errno %d (%s)", what, err, strerror(err));
+        *last_ms = now;
+    }
+}
+
 static void link_task(void *arg)
 {
     int srv = -1;
-    int64_t last_beacon = 0;
+    int64_t last_beacon = 0, last_sock_err = 0, last_accept_err = 0;
+    int accept_errors = 0;   /* in a row, other than the 1 s timeout */
     for (;;) {
         if (srv < 0) {
             srv = socket(AF_INET, SOCK_STREAM, 0);
             if (srv < 0) {
+                complain("socket", errno, &last_sock_err);
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 continue;
             }
@@ -243,6 +255,7 @@ static void link_task(void *arg)
             setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
             struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(PORT), .sin_addr.s_addr = htonl(INADDR_ANY) };
             if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(srv, 1) < 0) {
+                complain("bind/listen", errno, &last_sock_err);
                 close(srv);
                 srv = -1;
                 vTaskDelay(pdMS_TO_TICKS(2000));
@@ -256,6 +269,21 @@ static void link_task(void *arg)
         socklen_t plen = sizeof(peer);
         int fd = accept(srv, (struct sockaddr *)&peer, &plen);
         if (fd < 0) {
+            if (errno != EWOULDBLOCK && errno != EAGAIN && errno != ETIMEDOUT) {
+                /* Not the timeout: the socket table is full (ENFILE/EMFILE, a leak elsewhere) or
+                 * the listener itself is broken. Say so; a listener that keeps failing is remade,
+                 * which also drops a connection that sat in its backlog unaccepted. */
+                complain("accept", errno, &last_accept_err);
+                if (++accept_errors >= 5) {
+                    ESP_LOGW(TAG, "recreating the listener");
+                    close(srv);
+                    srv = -1;
+                    accept_errors = 0;
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
             int64_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
             if (now - last_beacon >= BEACON_S * 1000) {
                 beacon();
@@ -263,6 +291,7 @@ static void link_task(void *arg)
             }
             continue;
         }
+        accept_errors = 0;
         int yes = 1;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
         struct timeval tv = { .tv_usec = 100 * 1000 };

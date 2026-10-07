@@ -43,6 +43,10 @@
 #include "muse_settings_ui.h"
 #include "muse_state.h"
 #include "muse_voice.h"
+#if CONFIG_MUSE_PET
+#include "muse_audio.h"
+#include "pet.h"
+#endif
 #include "muse_wifi.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -593,6 +597,283 @@ static void update_transcript(const char *caption, bool fresh, bool opened, floa
     }
 }
 
+
+#if CONFIG_MUSE_PET
+/* ---- the pet's panel: under the creature's feet while nothing else needs the space ---- */
+
+#define PET_GAME_S 10.0f
+#define PET_BALL_PX 24
+#define PET_BALL_MOVE_S 0.7f
+
+static lv_obj_t *s_pet_panel;
+static lv_obj_t *s_pet_name_lbl;
+static lv_obj_t *s_pet_mood_lbl;
+static lv_obj_t *s_pet_info_lbl;   /* stage and age */
+static lv_obj_t *s_pet_hint_lbl;
+static lv_obj_t *s_pet_bars[PET_NEED_COUNT];
+static lv_obj_t *s_pet_bar_lbls[PET_NEED_COUNT];
+static lv_obj_t *s_pet_btns[5];
+static lv_obj_t *s_pet_btn_lbls[5];
+static lv_obj_t *s_pet_ball;
+static lv_obj_t *s_pet_score_lbl;
+static float s_pet_next_update;
+static float s_bubble_until;       /* the transcript box shows the pet's words until then */
+static float s_game_until;         /* > 0: the tap game is on */
+static float s_game_next_move;
+static int s_game_hits;
+
+static void upper(char *s)
+{
+    for (; *s; s++) {
+        if (*s >= 'a' && *s <= 'z') {
+            *s = (char)(*s - 'a' + 'A');
+        }
+    }
+}
+
+/* From the pet task or Home Link: the words go through the transcript store, the frame shows them. */
+void pet_ui_bubble(const char *text, int secs)
+{
+    muse_state_set_heard("");
+    muse_state_set_transcript(text);
+    s_bubble_until = (float)esp_timer_get_time() / 1e6f + (float)secs;
+}
+
+static void pet_game_place_ball(float now)
+{
+    int pw = lv_obj_get_width(s_pet_panel), ph = lv_obj_get_height(s_pet_panel);
+    int x = (int)lv_rand(0, (uint32_t)(pw - PET_BALL_PX)), y = (int)lv_rand(14, (uint32_t)(ph - PET_BALL_PX - 4));
+    lv_obj_set_pos(s_pet_ball, x, y);
+    s_game_next_move = now + PET_BALL_MOVE_S;
+}
+
+static void pet_game_end(float now)
+{
+    (void)now;
+    s_game_until = 0;
+    lv_obj_add_flag(s_pet_ball, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_pet_score_lbl, LV_OBJ_FLAG_HIDDEN);
+    int score = s_game_hits > 10 ? 10 : s_game_hits;
+    pet_play(score);
+    char line[48];
+    snprintf(line, sizeof(line), "%d hit%s! %s", s_game_hits, s_game_hits == 1 ? "" : "s",
+             score >= 8 ? "WOW!" : score >= 5 ? "Nice." : "Hm.");
+    pet_ui_bubble(line, 4);
+    s_pet_next_update = 0;
+}
+
+static void on_pet_ball(lv_event_t *e)
+{
+    (void)e;
+    if (s_game_until <= 0) {
+        return;
+    }
+    s_game_hits++;
+    muse_voice_request_sound(MUSE_SOUND_TICK, 1);
+    lv_label_set_text_fmt(s_pet_score_lbl, "%d", s_game_hits);
+    pet_game_place_ball((float)esp_timer_get_time() / 1e6f);
+}
+
+static void pet_game_start(float now)
+{
+    s_game_until = now + PET_GAME_S;
+    s_game_hits = 0;
+    lv_label_set_text(s_pet_score_lbl, "0");
+    lv_obj_remove_flag(s_pet_score_lbl, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_pet_ball, LV_OBJ_FLAG_HIDDEN);
+    pet_game_place_ball(now);
+    s_pet_next_update = 0;
+}
+
+static void on_pet_button(lv_event_t *e)
+{
+    int b = (int)(intptr_t)lv_event_get_user_data(e);
+    float now = (float)esp_timer_get_time() / 1e6f;
+    pet_view_t v;
+    pet_view(&v);
+    muse_state_poke();
+    switch (b) {
+    case 0:
+        if (!pet_feed(false)) {
+            pet_ui_bubble(v.asleep ? "zzz... (asleep)" : "Not hungry right now.", 3);
+        }
+        break;
+    case 1:
+        if (v.asleep) {
+            pet_ui_bubble("zzz... (asleep)", 3);
+        } else if (s_game_until <= 0) {
+            pet_game_start(now);
+        }
+        break;
+    case 2:
+        pet_clean();
+        break;
+    case 3:
+        if (!pet_medicine()) {
+            pet_ui_bubble("Not sick. No meds needed.", 3);
+        }
+        break;
+    case 4:
+        pet_lights(!v.lights_off);
+        break;
+    default:
+        break;
+    }
+    s_pet_next_update = 0;
+}
+
+static void build_pet_panel(lv_obj_t *face, int top, int bottom)
+{
+    const int w = s_w - 12, h = bottom - top;
+    s_pet_panel = lv_obj_create(face);
+    lv_obj_remove_style_all(s_pet_panel);
+    lv_obj_set_size(s_pet_panel, w, h);
+    lv_obj_align(s_pet_panel, LV_ALIGN_TOP_MID, 0, top);
+    lv_obj_remove_flag(s_pet_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(s_pet_panel, LV_OBJ_FLAG_CLICKABLE);
+
+    s_pet_name_lbl = make_label(s_pet_panel, &lv_font_unscii_16, COLOR_CAPTION);
+    lv_obj_set_style_text_align(s_pet_name_lbl, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(s_pet_name_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_pet_mood_lbl = make_label(s_pet_panel, &lv_font_unscii_8, COLOR_ACCENT);
+    lv_obj_set_style_text_align(s_pet_mood_lbl, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(s_pet_mood_lbl, LV_ALIGN_TOP_LEFT, 0, 20);
+    s_pet_info_lbl = make_label(s_pet_panel, &lv_font_unscii_8, COLOR_DIM);
+    lv_obj_align(s_pet_info_lbl, LV_ALIGN_TOP_RIGHT, 0, 5);
+    s_pet_hint_lbl = make_label(s_pet_panel, &lv_font_unscii_8, COLOR_DIM);
+    lv_obj_set_width(s_pet_hint_lbl, w);
+    lv_label_set_long_mode(s_pet_hint_lbl, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_align(s_pet_hint_lbl, LV_ALIGN_CENTER, 0, 2);
+    lv_obj_add_flag(s_pet_hint_lbl, LV_OBJ_FLAG_HIDDEN);
+
+    static const char *const NAMES[PET_NEED_COUNT] = { "FOOD", "REST", "FUN", "CLEAN", "LOVE" };
+    static const uint32_t COLORS[PET_NEED_COUNT] = { 0xffa64d, 0x6ea8ff, 0xffe066, 0x5ad1ff, 0xff7ad9 };
+    const int col_w = w / 2, bar_x = 46, row_h = 20, rows_y = 38;
+    for (int i = 0; i < PET_NEED_COUNT; i++) {
+        int col = i & 1, row = i >> 1;
+        int x = col * (col_w + 2), y = rows_y + row * row_h;
+        s_pet_bar_lbls[i] = make_label(s_pet_panel, &lv_font_unscii_8, COLOR_DIM);
+        lv_label_set_text(s_pet_bar_lbls[i], NAMES[i]);
+        lv_obj_set_style_text_align(s_pet_bar_lbls[i], LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_pos(s_pet_bar_lbls[i], x, y + 1);
+        lv_obj_t *bar = lv_bar_create(s_pet_panel);
+        lv_obj_remove_style_all(bar);
+        lv_obj_set_size(bar, col_w - bar_x - 6, 8);
+        lv_obj_set_pos(bar, x + bar_x, y + 1);
+        lv_bar_set_range(bar, 0, 100);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(COLOR_METER_OFF), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar, 2, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(COLORS[i]), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(bar, 2, LV_PART_INDICATOR);
+        s_pet_bars[i] = bar;
+    }
+
+    static const char *const BTN[5] = { "FEED", "PLAY", "CLEAN", "MEDS", "ZZZ" };
+    const int gap = 4, bw = (w - gap * 4) / 5, bh = 30, by = h - bh;
+    for (int b = 0; b < 5; b++) {
+        lv_obj_t *btn = lv_button_create(s_pet_panel);
+        lv_obj_remove_style_all(btn);
+        lv_obj_set_size(btn, bw, bh);
+        lv_obj_set_pos(btn, b * (bw + gap), by);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_METER_OFF), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(btn, 4, 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_ACCENT), LV_STATE_PRESSED);
+        lv_obj_add_event_cb(btn, on_pet_button, LV_EVENT_CLICKED, (void *)(intptr_t)b);
+        s_pet_btn_lbls[b] = make_label(btn, &lv_font_unscii_8, COLOR_CAPTION);
+        lv_label_set_text(s_pet_btn_lbls[b], BTN[b]);
+        lv_obj_center(s_pet_btn_lbls[b]);
+        s_pet_btns[b] = btn;
+    }
+
+    s_pet_ball = lv_obj_create(s_pet_panel);
+    lv_obj_remove_style_all(s_pet_ball);
+    lv_obj_set_size(s_pet_ball, PET_BALL_PX, PET_BALL_PX);
+    lv_obj_set_style_radius(s_pet_ball, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_pet_ball, lv_color_hex(COLOR_ACCENT), 0);
+    lv_obj_set_style_bg_opa(s_pet_ball, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_pet_ball, lv_color_hex(COLOR_LIT), 0);
+    lv_obj_set_style_border_width(s_pet_ball, 2, 0);
+    lv_obj_set_ext_click_area(s_pet_ball, 10);
+    lv_obj_add_flag(s_pet_ball, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_pet_ball, on_pet_ball, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_flag(s_pet_ball, LV_OBJ_FLAG_HIDDEN);
+    s_pet_score_lbl = make_label(s_pet_panel, &lv_font_unscii_16, COLOR_ACCENT);
+    lv_obj_align(s_pet_score_lbl, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_add_flag(s_pet_score_lbl, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Every frame while the panel shows: the game moves; four times a second the rest refreshes. */
+static void update_pet_panel(float now)
+{
+    if (s_game_until > 0) {
+        if (now >= s_game_until) {
+            pet_game_end(now);
+        } else if (now >= s_game_next_move) {
+            pet_game_place_ball(now);
+        }
+    }
+    if (now < s_pet_next_update) {
+        return;
+    }
+    s_pet_next_update = now + 0.25f;
+    pet_view_t v;
+    pet_view(&v);
+    bool egg = v.stage == PET_EGG;
+    bool game = s_game_until > 0;
+    lv_obj_set_flag(s_pet_hint_lbl, LV_OBJ_FLAG_HIDDEN, !egg);
+    for (int i = 0; i < PET_NEED_COUNT; i++) {
+        lv_obj_set_flag(s_pet_bars[i], LV_OBJ_FLAG_HIDDEN, egg || game);
+        lv_obj_set_flag(s_pet_bar_lbls[i], LV_OBJ_FLAG_HIDDEN, egg || game);
+        if (!egg && !game) {
+            lv_bar_set_value(s_pet_bars[i], v.needs[i], LV_ANIM_ON);
+        }
+    }
+    for (int b = 0; b < 5; b++) {
+        lv_obj_set_flag(s_pet_btns[b], LV_OBJ_FLAG_HIDDEN, egg || game);
+    }
+    lv_obj_set_flag(s_pet_mood_lbl, LV_OBJ_FLAG_HIDDEN, game);
+    lv_obj_set_flag(s_pet_info_lbl, LV_OBJ_FLAG_HIDDEN, game);
+
+    char line[64], age[16];
+    if (v.age_min < 60) {
+        snprintf(age, sizeof(age), "%uM", (unsigned)v.age_min);
+    } else if (v.age_min < 24 * 60) {
+        snprintf(age, sizeof(age), "%uH", (unsigned)(v.age_min / 60));
+    } else {
+        snprintf(age, sizeof(age), "%uD", (unsigned)(v.age_min / 1440));
+    }
+    if (egg) {
+        lv_label_set_text(s_pet_name_lbl, "EGG");
+        lv_label_set_text_fmt(s_pet_info_lbl, "GEN %u  %s", (unsigned)v.generation, age);
+        lv_label_set_text_fmt(s_pet_mood_lbl, "WARMTH %d%%", (int)(v.egg_warmth * 100));
+        lv_label_set_text(s_pet_hint_lbl, v.egg_warmth < 0.3f ? "TAP THE EGG TO WARM IT"
+                                          : v.egg_warmth < 0.7f ? "IT'S MOVING... KEEP GOING"
+                                                                 : "ALMOST THERE!");
+    } else {
+        char stage[12];
+        strlcpy(stage, pet_stage_name(v.stage), sizeof(stage));
+        upper(stage);
+        lv_label_set_text(s_pet_name_lbl, v.name[0] ? v.name : "(NO NAME)");
+        snprintf(line, sizeof(line), "GEN %u  %s  %s", (unsigned)v.generation, stage, age);
+        lv_label_set_text(s_pet_info_lbl, line);
+        char mood[16];
+        strlcpy(mood, pet_mood_name(v.mood), sizeof(mood));
+        upper(mood);
+        if (v.sick) {
+            lv_label_set_text_fmt(s_pet_mood_lbl, "SICK  HP %d", v.health);
+        } else {
+            lv_label_set_text_fmt(s_pet_mood_lbl, "%s  HP %d", mood, v.health);
+        }
+        lv_obj_set_style_text_color(s_pet_btn_lbls[3], lv_color_hex(v.sick ? COLOR_LIT : COLOR_DIM), 0);
+        lv_label_set_text(s_pet_btn_lbls[4], v.lights_off ? "WAKE" : "ZZZ");
+        lv_obj_set_style_text_color(s_pet_btn_lbls[2], lv_color_hex(v.poops || v.needs[PET_NEED_CLEAN] < 40 ? COLOR_LIT : COLOR_CAPTION), 0);
+    }
+}
+#endif
+
 /* Icons beside the physical buttons, in place of an instruction caption. */
 static void build_button_icons(lv_obj_t *face)
 {
@@ -615,6 +896,9 @@ static void on_canvas_clicked(lv_event_t *e)
 {
     (void)e;
     muse_state_make_happy();
+#if CONFIG_MUSE_PET
+    pet_tap();
+#endif
 }
 
 static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compact)
@@ -1096,6 +1380,14 @@ static void build_screen(void)
                     l->hides[2] = s_caption_lbl;
                 }
                 build_transcript(face);
+#if CONFIG_MUSE_PET
+                /* The creature lives at the top; its panel takes the room under its feet, above
+                 * the caption line and the mic icon. */
+                build_pet_panel(face, box_top, s_h - 64);
+                s_big_y = s_answers[0].y;
+                lv_obj_align(s_canvas, LV_ALIGN_CENTER, 0, s_big_y);
+                s_muse_y = s_big_y;
+#endif
                 ESP_LOGI(TAG, "transcript: %d x %d px under a %d px Muse", s_answers[0].w, s_answers[0].h, s_canvas_px);
                 return;
             }
@@ -1622,6 +1914,11 @@ static void update_status(muse_mode_t mode, float now)
              * error; not the Pi's "now saying" line, which comes with its speech). */
             answer = s_answer;
         }
+#if CONFIG_MUSE_PET
+        else if (s_reply_box && mode == MUSE_MODE_IDLE && now < s_bubble_until) {
+            answer = ANSWER_READ;   /* the pet's speech bubble */
+        }
+#endif
     }
     bool opened = answer >= 0 && s_answer < 0;
     if (answer != s_answer) {
@@ -1638,6 +1935,20 @@ static void update_status(muse_mode_t mode, float now)
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : reply_area(), LV_OBJ_FLAG_HIDDEN);
         }
     }
+#if CONFIG_MUSE_PET
+    if (s_pet_panel) {
+        bool show = answer < 0;
+        lv_obj_set_flag(s_pet_panel, LV_OBJ_FLAG_HIDDEN, !show);
+        if (show) {
+            update_pet_panel(now);
+            lv_obj_set_flag(s_state_lbl, LV_OBJ_FLAG_HIDDEN, mode == MUSE_MODE_IDLE);
+        } else if (s_game_until > 0) {
+            s_game_until = 0;   /* something else took the screen: the game is off */
+            lv_obj_add_flag(s_pet_ball, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_pet_score_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
     update_power(now);
 }
 

@@ -90,6 +90,9 @@ endif()
 
 if(CONFIG_MUSE_GADGET_TOOLS)
     list(APPEND GADGET_SRCS "gadget_tools.c" "gadget_canvas.c" "gadget_more.c")
+    if(CONFIG_MUSE_PET)
+        list(APPEND GADGET_SRCS "gadget_pet.c")
+    endif()
 endif()
 
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING)

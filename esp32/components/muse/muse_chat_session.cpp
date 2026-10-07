@@ -108,6 +108,9 @@ static const char *TAG = "muse_chat_session";
 #define OUT_BYTES (MIC_RATE * 2 * 2)       /* 2 s of decoded reply */
 #define EV_TEXT 72
 #define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
+/* A typed turn's text as it streams (the voice turns keep theirs in s_turn.texts). */
+#define TYPED_MAX 1024
+static char s_typed_text[TYPED_MAX];
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
@@ -1011,6 +1014,7 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.gen = gen;
     s_turn.text = text;
     s_turn.tts_msg = -1;
+    s_typed_text[0] = '\0';
     memset(s_marks, 0, sizeof(s_marks));
     s_reply_shown[0] = '\0';
     s_turn.start_us = now_us();
@@ -1402,6 +1406,11 @@ static void show_reply_start(const msg_t &m)
     }
 }
 
+extern "C" __attribute__((weak)) void muse_hatch_typed_reply(const char *text)
+{
+    (void)text;
+}
+
 static void message_done(int i, const char *final_text)
 {
     msg_t &m = s_turn.msgs[i];
@@ -1419,6 +1428,7 @@ static void message_done(int i, const char *final_text)
         }
         muse_hatch_console("message_done", nullptr, "\"msg\":%d,\"bytes\":%u", i, (unsigned)n);
         ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)n);
+        muse_hatch_typed_reply(final_text && final_text[0] ? final_text : s_typed_text);
         return;
     }
     if (!m.len && final_text && final_text[0]) {
@@ -1501,6 +1511,7 @@ static void on_event(cJSON *line)
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
             m.len += strlen(text);
+            strlcat(s_typed_text, text, TYPED_MAX);
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             mark(M_TEXT);
