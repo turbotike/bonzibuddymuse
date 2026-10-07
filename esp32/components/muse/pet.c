@@ -690,7 +690,7 @@ static event_t advance(float dt_min, bool offline)
     event_t ev = EV_NONE;
     if (s.stage == PET_EGG) {
         s.age_min += dt_min;
-        if (s.egg_warmth >= 1.0f || s.age_min >= EGG_AUTO_HATCH_MIN) {
+        if (s.egg_warmth >= 1.0f) {   /* only warmed by hand: it waits for Mat */
             hatch();
             return EV_HATCHED;
         }

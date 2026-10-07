@@ -614,31 +614,57 @@ static const theme_t THEMES[] = {
 };
 #define THEME_COUNT 4
 
-enum { ICON_FOOD, ICON_TRAIN, ICON_CLEAN, ICON_MEDS, ICON_LIGHT, ICON_STATS, ICON_THEME, ICON_COUNT, ICON_HEART = ICON_COUNT, ICON_FUN, ICON_ALL };
+enum { ICON_FOOD, ICON_TRAIN, ICON_CLEAN, ICON_MEDS, ICON_LIGHT, ICON_STATS, ICON_THEME, ICON_COUNT, ICON_HEART = ICON_COUNT, ICON_MOON, ICON_ALL };
 
-/* 8x8 pixel icons, as alpha masks the theme colours. */
-static const char *const ICON_ART[ICON_ALL][8] = {
-    { "...X....", "..XXXX..", ".XXXXXX.", "XXXXXXXX", "XXXXXXXX", "XXXXXXXX", ".XXXXXX.", "..X..X.." },   /* food */
-    { "........", "........", "X......X", "XX.XX.XX", "XXXXXXXX", "XX.XX.XX", "X......X", "........" },   /* train */
-    { "...X....", "...X....", "..XXX...", ".XXXXX..", "XXXXXXX.", "XXXXXXX.", ".XXXXX..", "..XXX..." },   /* clean */
-    { "..XXX...", "..XXX...", "..XXX...", "XXXXXXXX", "XXXXXXXX", "XXXXXXXX", "..XXX...", "..XXX..." },   /* meds */
-    { "..XXXX..", ".X....X.", "X......X", "X......X", ".X....X.", "..XXXX..", "..XXXX..", "...XX..." },   /* light */
-    { "......XX", "......XX", "...XX.XX", "...XX.XX", "XX.XX.XX", "XX.XX.XX", "XX.XX.XX", "XXXXXXXX" },   /* stats */
-    { ".XXXXXX.", "X.X.X..X", "XX.X.X.X", "X.X.X..X", "XX.X.XXX", "X......X", "X......X", ".XXXXXX." },   /* theme */
-    { "........", ".XX..XX.", "XXXXXXXX", "XXXXXXXX", ".XXXXXX.", "..XXXX..", "...XX...", "........" },   /* heart */
-    { "..XXXX..", ".X....X.", "X.X..X.X", "X......X", "X.X..X.X", "X..XX..X", ".X....X.", "..XXXX.." },   /* fun */
+/* 16x16 pixel icons in colour: a letter a colour, '.' clear. */
+static const char *const ICON_ART[ICON_ALL][16] = {
+    { "......kk........", ".....kgGk.......", "....kgGGk.......", "...kkkkkkk......", "..krrrrrrrk.....", ".krwrrrrrrrk....", "krrwrrrrrrrrk...", "krrrrrrrrrRrk...", "krrrrrrrrrRRk...", "krrrrrrrrRRRk...", "krrrrrrrRRRRk...", ".krrrrrRRRRk....", ".kRrrrRRRRRk....", "..kRRRk.kRRk....", "...kkk...kk.....", "................" },   /* food */
+    { "................", "................", "..kk........kk..", ".kcck......kcck.", ".kccCk....kCcck.", "kkccCkkkkkkCcckk", "kcccCkccccckCcck", "kcCCCkCCCCCkCCCk", "kcCCCkCCCCCkCCCk", "kkCCCkkkkkkkCCkk", ".kCCCk....kCCCk.", ".kkCCk....kCCkk.", "..kkkk....kkkk..", "................", "................", "................" },   /* train */
+    { ".....w..........", "....w.w....ww...", ".....w....w..w..", "...........ww...", "..kkkkkkkkkk....", ".kppppppppppk...", "kpwwppppppppPk..", "kpwpppppppppPk..", "kppppppppppPPk..", "kppppppppppPPk..", "kpppppppppPPPk..", ".kPPPPPPPPPPk...", "..kkkkkkkkkk....", "......w.........", ".....w.w........", "......w........." },   /* clean */
+    { "................", "................", "................", "....kkkkkkkk....", "...krrrrkwwwk...", "..krrrrrkwwwwk..", ".krrwrrrkwwwwwk.", ".krrwrrrkwwwwwk.", ".krrrrrrkwwwwwk.", ".krrrrrrkwwwwwk.", "..kRrrrrkwwwlk..", "...kRRRRkwllk...", "....kkkkkkkk....", "................", "................", "................" },   /* meds */
+    { ".....kkkkk......", "....kyyyyyk.....", "...kyywyyyyk....", "..kyywyyyyyyk...", "..kyyyyyyyyyk...", "..kyyyyyyyyyk...", "..kYyyyyyyyYk...", "...kYyyyyyYk....", "....kYYYYYk.....", ".....kcccCk.....", ".....kcccCk.....", ".....kCCCCk.....", "......kkkk......", "................", "................", "................" },   /* light */
+    { "................", "..............kk", ".............kgk", ".........kk..kgk", "........kykk.kgk", "........kyk..kgk", "....kk..kyk..kgk", "...kbkk.kyk..kgk", "...kbk..kyk..kgk", "...kbk..kyk..kgk", "...kbk..kyk..kgk", "...kbk..kyk..kgk", "...kbk..kyk..kgk", "kkkkkkkkkkkkkkkk", "kcccccccccccccck", ".kkkkkkkkkkkkkk." },   /* stats */
+    { "....kkkkkkk.....", "..kktttttttkk...", ".kttrkttttgttk..", ".ktrrkttttggtk..", "kttkktttttkkttk.", "kttttttttttttttk", "kttbbttttttyytk.", "kttbbtttkttyytk.", ".kttttttkkktttk.", ".kttttttkkkttk..", "..ktttttkktttk..", "..kttttttttttk..", "...kttttttttk...", "....kkkkkkkk....", "................", "................" },   /* theme */
+    { "................", "..kkk....kkk....", ".krrrk..krrrk...", "krrwrrkkrrrrrk..", "krwrrrrrrrrrrk..", "krrrrrrrrrrrrk..", "krrrrrrrrrrrrk..", ".krrrrrrrrrrk...", "..krrrrrrrrk....", "...krrrrrrk.....", "....krrrrk......", ".....krrk.......", "......kk........", "................", "................", "................" },   /* heart */
+    { "..........w.....", "......kkk.......", "....kkllkk......", "...kllk..kk.....", "..klllk.........", "..kllk..........", ".klllk..........", ".klllk.....w....", ".klllk..........", "..kllk..........", "..klllk.........", "...kllkk..kk....", "....kkllkkk.....", "......kkk.......", ".w..............", "................" },   /* moon */
 };
-static uint8_t s_icon_px[ICON_ALL][64];
+EXT_RAM_BSS_ATTR static uint8_t s_icon_px[ICON_ALL][16 * 16 * 4];   /* ARGB8888 */
 static lv_image_dsc_t s_icon_dsc[ICON_ALL];
+
+static uint32_t icon_colour(char c)
+{
+    switch (c) {
+    case 'k': return 0x14121e;
+    case 'w': return 0xffffff;
+    case 'r': return 0xff3b3b;
+    case 'R': return 0xb01818;
+    case 'g': return 0x45d84f;
+    case 'G': return 0x1f8a2a;
+    case 'y': return 0xffe14a;
+    case 'Y': return 0xd9a800;
+    case 'o': return 0xff8a2a;
+    case 'b': return 0x4aa8ff;
+    case 'B': return 0x1f5fb0;
+    case 'p': return 0xff6ad5;
+    case 'P': return 0xc03090;
+    case 'c': return 0x9a9ab0;
+    case 'C': return 0x5c5c72;
+    case 'n': return 0x7a4a2a;
+    case 't': return 0xf5e6c8;
+    case 'l': return 0xdfe7ff;
+    default: return 0;
+    }
+}
 
 #define LCD_X 10
 #define LCD_Y 12
 #define LCD_W 300
-#define LCD_H 376
+#define LCD_H 360
 #define TOY_BUBBLE_S 12
 #define TRAIN_ROUNDS 5
 
-static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_lcd;
+static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_rim, *s_toy_lcd, *s_toy_brand;
+static lv_obj_t *s_toy_socket[3], *s_toy_gloss[3];
 static lv_obj_t *s_toy_icons[ICON_COUNT], *s_toy_icon_imgs[ICON_COUNT];
 static lv_obj_t *s_toy_btn[3], *s_toy_btn_lbl[3];
 static lv_obj_t *s_toy_strip, *s_toy_mood, *s_toy_caption;
@@ -681,32 +707,37 @@ static const theme_t *theme(void)
 static void icon_init(void)
 {
     for (int i = 0; i < ICON_ALL; i++) {
-        for (int r = 0; r < 8; r++) {
-            for (int c = 0; c < 8; c++) {
-                s_icon_px[i][r * 8 + c] = ICON_ART[i][r][c] == 'X' ? 255 : 0;
+        for (int r = 0; r < 16; r++) {
+            for (int c = 0; c < 16; c++) {
+                char ch = ICON_ART[i][r][c];
+                uint32_t rgb = icon_colour(ch);
+                uint8_t *p = &s_icon_px[i][(r * 16 + c) * 4];
+                p[0] = rgb & 0xff;           /* B */
+                p[1] = (rgb >> 8) & 0xff;    /* G */
+                p[2] = (rgb >> 16) & 0xff;   /* R */
+                p[3] = ch == '.' ? 0 : 255;  /* A */
             }
         }
         lv_image_dsc_t *d = &s_icon_dsc[i];
         memset(d, 0, sizeof(*d));
         d->header.magic = LV_IMAGE_HEADER_MAGIC;
-        d->header.cf = LV_COLOR_FORMAT_A8;
-        d->header.w = 8;
-        d->header.h = 8;
-        d->header.stride = 8;
-        d->data_size = 64;
+        d->header.cf = LV_COLOR_FORMAT_ARGB8888;
+        d->header.w = 16;
+        d->header.h = 16;
+        d->header.stride = 16 * 4;
+        d->data_size = 16 * 16 * 4;
         d->data = s_icon_px[i];
     }
 }
 
 static lv_obj_t *make_icon(lv_obj_t *parent, int which, int px, uint32_t color)
 {
+    (void)color;
     lv_obj_t *img = lv_image_create(parent);
     lv_image_set_src(img, &s_icon_dsc[which]);
     lv_obj_set_size(img, px, px);
     lv_image_set_inner_align(img, LV_IMAGE_ALIGN_STRETCH);
     lv_image_set_antialias(img, false);
-    lv_obj_set_style_image_recolor(img, lv_color_hex(color), 0);
-    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
     return img;
 }
@@ -749,21 +780,29 @@ static void apply_theme(void)
     for (int i = 0; i < ICON_COUNT; i++) {
         bool sel = i == s_toy_sel;
         lv_obj_set_style_bg_color(s_toy_icons[i], lv_color_hex(t->neon), 0);
-        lv_obj_set_style_bg_opa(s_toy_icons[i], sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_image_recolor(s_toy_icon_imgs[i], lv_color_hex(sel ? t->lcd : t->dim), 0);
+        lv_obj_set_style_bg_opa(s_toy_icons[i], sel ? LV_OPA_60 : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(s_toy_icons[i], lv_color_hex(t->neon), 0);
+        lv_obj_set_style_border_width(s_toy_icons[i], sel ? 2 : 0, 0);
     }
+    lv_obj_set_style_bg_color(s_toy_body, lv_color_lighten(lv_color_hex(t->frame), 30), 0);
+    lv_obj_set_style_bg_grad_color(s_toy_body, lv_color_hex(t->frame_dark), 0);
+    lv_obj_set_style_bg_color(s_toy_rim, lv_color_darken(lv_color_hex(t->frame_dark), 60), 0);
+    lv_obj_set_style_border_color(s_toy_rim, lv_color_hex(t->lcd_line), 0);
+    lv_obj_set_style_text_color(s_toy_brand, lv_color_hex(t->dim), 0);
     for (int b = 0; b < 3; b++) {
-        lv_obj_set_style_bg_color(s_toy_btn[b], lv_color_hex(t->frame_dark), 0);
-        lv_obj_set_style_bg_color(s_toy_btn[b], lv_color_hex(t->neon), LV_STATE_PRESSED);
-        lv_obj_set_style_border_color(s_toy_btn[b], lv_color_hex(t->neon2), 0);
-        lv_obj_set_style_text_color(s_toy_btn_lbl[b], lv_color_hex(t->text), 0);
+        lv_color_t plastic = lv_color_hex(t->neon2);
+        lv_obj_set_style_bg_color(s_toy_socket[b], lv_color_darken(lv_color_hex(t->frame_dark), 80), 0);
+        lv_obj_set_style_border_color(s_toy_socket[b], lv_color_darken(lv_color_hex(t->frame_dark), 140), 0);
+        lv_obj_set_style_bg_color(s_toy_btn[b], lv_color_lighten(plastic, 40), 0);
+        lv_obj_set_style_bg_grad_color(s_toy_btn[b], lv_color_darken(plastic, 110), 0);
+        lv_obj_set_style_bg_color(s_toy_btn[b], lv_color_darken(plastic, 90), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_grad_color(s_toy_btn[b], lv_color_darken(plastic, 30), LV_STATE_PRESSED);
+        lv_obj_set_style_border_color(s_toy_btn[b], lv_color_lighten(plastic, 120), 0);
+        lv_obj_set_style_text_color(s_toy_btn_lbl[b], lv_color_hex(t->lcd), 0);
     }
     lv_obj_set_style_text_color(s_toy_strip, lv_color_hex(t->neon2), 0);
     lv_obj_set_style_text_color(s_toy_mood, lv_color_hex(t->text), 0);
     lv_obj_set_style_text_color(s_toy_caption, lv_color_hex(t->dim), 0);
-    for (int i = 0; i < 4; i++) {
-        lv_obj_set_style_image_recolor(s_toy_alert[i], lv_color_hex(t->neon), 0);
-    }
     lv_obj_set_style_bg_color(s_bubble, lv_color_hex(t->text), 0);
     lv_obj_set_style_border_color(s_bubble, lv_color_hex(t->neon), 0);
     lv_obj_set_style_text_color(s_bubble_lbl, lv_color_hex(t->lcd), 0);
@@ -1110,24 +1149,36 @@ static void build_toy(lv_obj_t *face)
     lv_obj_set_style_radius(s_toy_body, 26, 0);
     lv_obj_set_style_border_width(s_toy_body, 2, 0);
     lv_obj_move_to_index(s_toy_body, 1);
+    lv_obj_set_style_bg_grad_dir(s_toy_body, LV_GRAD_DIR_VER, 0);
+    s_toy_rim = plain(face);
+    lv_obj_set_size(s_toy_rim, LCD_W + 10, LCD_H + 10);
+    lv_obj_set_pos(s_toy_rim, LCD_X - 5, LCD_Y - 5);
+    lv_obj_set_style_bg_opa(s_toy_rim, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_toy_rim, 18, 0);
+    lv_obj_set_style_border_width(s_toy_rim, 2, 0);
+    lv_obj_move_to_index(s_toy_rim, 2);
     s_toy_lcd = plain(face);
     lv_obj_set_size(s_toy_lcd, LCD_W, LCD_H);
     lv_obj_set_pos(s_toy_lcd, LCD_X, LCD_Y);
     lv_obj_set_style_bg_opa(s_toy_lcd, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_toy_lcd, 14, 0);
     lv_obj_set_style_border_width(s_toy_lcd, 3, 0);
-    lv_obj_move_to_index(s_toy_lcd, 2);
+    lv_obj_move_to_index(s_toy_lcd, 3);
+    s_toy_brand = make_label(face, &lv_font_unscii_8, 0xffffff);
+    lv_label_set_text(s_toy_brand, "DINO-PET 2000");
+    lv_obj_set_style_text_letter_space(s_toy_brand, 2, 0);
+    lv_obj_align(s_toy_brand, LV_ALIGN_BOTTOM_MID, 0, -5);
 
     /* The icon bar along the LCD's top. */
     for (int i = 0; i < ICON_COUNT; i++) {
         lv_obj_t *cell = plain(face);
         lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(cell, 36, 34);
-        lv_obj_set_pos(cell, LCD_X + 12 + i * 40, LCD_Y + 8);
-        lv_obj_set_style_radius(cell, 6, 0);
+        lv_obj_set_size(cell, 38, 38);
+        lv_obj_set_pos(cell, LCD_X + 9 + i * 41, LCD_Y + 7);
+        lv_obj_set_style_radius(cell, 8, 0);
         lv_obj_add_event_cb(cell, on_toy_icon, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         s_toy_icons[i] = cell;
-        s_toy_icon_imgs[i] = make_icon(cell, i, 24, 0xffffff);
+        s_toy_icon_imgs[i] = make_icon(cell, i, 32, 0xffffff);
         lv_obj_center(s_toy_icon_imgs[i]);
     }
 
@@ -1153,18 +1204,39 @@ static void build_toy(lv_obj_t *face)
     /* The buttons under the LCD. */
     static const char *const BTN[3] = { "A", "B", "C" };
     for (int b = 0; b < 3; b++) {
+        lv_obj_t *sock = plain(face);
+        lv_obj_set_size(sock, 72, 72);
+        lv_obj_align(sock, LV_ALIGN_TOP_MID, (b - 1) * 96, LCD_Y + LCD_H + 12);
+        lv_obj_set_style_radius(sock, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(sock, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(sock, 2, 0);
+        s_toy_socket[b] = sock;
         lv_obj_t *btn = lv_button_create(face);
         lv_obj_remove_style_all(btn);
         lv_obj_set_size(btn, 58, 58);
-        lv_obj_align(btn, LV_ALIGN_TOP_MID, (b - 1) * 96, LCD_Y + LCD_H + 14);
+        lv_obj_align(btn, LV_ALIGN_TOP_MID, (b - 1) * 96, LCD_Y + LCD_H + 17);
         lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(btn, 3, 0);
-        lv_obj_set_style_shadow_width(btn, 0, 0);
+        lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, 0);
+        lv_obj_set_style_border_width(btn, 2, 0);
+        lv_obj_set_style_shadow_width(btn, 14, 0);
+        lv_obj_set_style_shadow_offset_y(btn, 6, 0);
+        lv_obj_set_style_shadow_color(btn, lv_color_black(), 0);
+        lv_obj_set_style_shadow_opa(btn, LV_OPA_70, 0);
+        lv_obj_set_style_translate_y(btn, 3, LV_STATE_PRESSED);
+        lv_obj_set_style_shadow_offset_y(btn, 2, LV_STATE_PRESSED);
+        lv_obj_set_style_shadow_width(btn, 6, LV_STATE_PRESSED);
         lv_obj_add_event_cb(btn, on_toy_button, LV_EVENT_CLICKED, (void *)(intptr_t)b);
+        lv_obj_t *gloss = plain(btn);
+        lv_obj_set_size(gloss, 34, 14);
+        lv_obj_align(gloss, LV_ALIGN_TOP_MID, 0, 6);
+        lv_obj_set_style_radius(gloss, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(gloss, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(gloss, LV_OPA_40, 0);
+        s_toy_gloss[b] = gloss;
         s_toy_btn_lbl[b] = make_label(btn, &lv_font_unscii_16, 0xffffff);
         lv_label_set_text(s_toy_btn_lbl[b], BTN[b]);
-        lv_obj_center(s_toy_btn_lbl[b]);
+        lv_obj_align(s_toy_btn_lbl[b], LV_ALIGN_CENTER, 0, 3);
         s_toy_btn[b] = btn;
     }
 
@@ -1374,6 +1446,7 @@ static void update_toy(float now, const char *caption, bool fresh)
         lv_label_set_text_fmt(s_toy_strip, "%s", v.name[0] ? v.name : "(NO NAME)");
         lv_label_set_text_fmt(s_toy_mood, "%s %s  %s%s  HP %d  PWR %d", stage, age, v.sick ? "SICK " : "", mood, v.health, v.power);
     }
+    lv_image_set_src(s_toy_icon_imgs[ICON_LIGHT], &s_icon_dsc[v.lights_off ? ICON_MOON : ICON_LIGHT]);
     bool awake = !v.asleep && v.stage != PET_EGG;
     bool blink_on = fmodf(now, 1.0f) < 0.6f;
     lv_obj_set_flag(s_toy_alert[0], LV_OBJ_FLAG_HIDDEN, !(awake && v.needs[PET_NEED_FOOD] < 30 && blink_on));
