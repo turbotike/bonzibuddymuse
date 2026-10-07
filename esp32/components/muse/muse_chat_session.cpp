@@ -76,6 +76,9 @@ extern "C" {
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_wifi.h"
+extern "C" {
+#include "muse_state.h"
+}
 }
 #include "muse_chat_priv.h"
 
@@ -1329,6 +1332,31 @@ static int bind_msg(const char *id, cJSON *payload)
     return s_turn.nmsgs++;
 }
 
+/* The reply so far, all its messages, for the screen's transcript under the avatar. */
+static char *s_transcript_buf;   /* MUSE_TRANSCRIPT_MAX */
+static void push_transcript()
+{
+    if (!s_turn.texts || !s_transcript_buf) {
+        return;
+    }
+    size_t n = 0;
+    s_transcript_buf[0] = '\0';
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        const char *t = s_turn.texts + i * TEXT_MAX;
+        if (!s_turn.msgs[i].len || !t[0]) {
+            continue;
+        }
+        if (n) {
+            n = strlcat(s_transcript_buf, "\n\n", MUSE_TRANSCRIPT_MAX);
+        }
+        n = strlcat(s_transcript_buf, t, MUSE_TRANSCRIPT_MAX);
+        if (n >= MUSE_TRANSCRIPT_MAX) {
+            break;
+        }
+    }
+    muse_state_set_transcript(s_transcript_buf);
+}
+
 static void append_text(msg_t &m, const char *text)
 {
     size_t add = strlen(text);
@@ -1340,6 +1368,7 @@ static void append_text(msg_t &m, const char *text)
         strlcat(full, text, TEXT_MAX);
     }
     m.len += add;
+    push_transcript();
     size_t have = strlen(m.tail);
     if (add >= sizeof(m.tail) - 1) {
         strlcpy(m.tail, text + add - (sizeof(m.tail) - 1), sizeof(m.tail));
@@ -2051,6 +2080,7 @@ extern "C" void muse_hatch_start(void)
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
     s_turn.note = VOICE_NOTE ? static_cast<uint8_t *>(psram_alloc(NOTE_PART_BYTES)) : nullptr;
     s_turn.texts = static_cast<char *>(psram_alloc(MAX_MSGS * TEXT_MAX));   /* captions just stay untimed without it */
+    s_transcript_buf = static_cast<char *>(psram_alloc(MUSE_TRANSCRIPT_MAX));
     s_pcm = static_cast<int16_t *>(psram_alloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t)));
     s_pcm16 = static_cast<int16_t *>(psram_alloc((MINIMP3_MAX_SAMPLES_PER_FRAME + 8) * sizeof(int16_t)));
     for (auto &s : s_streams) {

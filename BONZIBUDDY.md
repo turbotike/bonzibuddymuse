@@ -58,3 +58,14 @@ the first byte or the chip resets (tools/muse/chat.py does this).
   sdkconfig does not pick up new symbols on its own.
 - The 320x480 panel uses the same compact Winamp layouts as the 240x320 one:
   the thresholds in muse_ui.c and muse_settings_ui.c are `width < 340`.
+- While Bonzi answers on the 3.5", he stays full size under the status row and
+  the whole reply scrolls in a box under his feet (muse_ui.c `build_transcript`,
+  `update_transcript`): what he heard in dim type, then the reply as the chat
+  session streams it (muse_state_set_transcript, pushed from
+  muse_chat_session.cpp `push_transcript`). The box follows the line being
+  spoken (Muse's caption page, or the Pi's SHOW sentence, found in the text by
+  substring); a finger scroll pauses that for 8 s. The transcript stays up 45 s
+  after the reply, longer with each scroll, until the next press. The 240x320
+  layout (small Muse, paged text) is still there for screens with less room:
+  the choice is made from `muse_pixel_blank_rows()`, which the generated sprite
+  file defines (the figure is centred in its square canvas).

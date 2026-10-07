@@ -55,3 +55,11 @@ void muse_pixel_set_size(int px);
  * image never has to exist in RAM.
  */
 void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1);
+
+/*
+ * Blank rows above and below the figure when the grid is blown up to `px`,
+ * so the UI can put text right under its feet. Weak default in muse_ui.c for
+ * the procedural art (which fills its grid but for the bottom rows); a sprite
+ * avatar centred in the square overrides it.
+ */
+void muse_pixel_blank_rows(int px, int *top, int *bottom);

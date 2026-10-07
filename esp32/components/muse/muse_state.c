@@ -18,8 +18,10 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -46,6 +48,11 @@ static uint32_t s_caption_version;
 static SemaphoreHandle_t s_format_lock;
 static EventGroupHandle_t s_wake;
 static volatile int s_page_cols = 16, s_page_lines = 2;
+static char s_heard[MUSE_HEARD_MAX];
+static char *s_transcript;        /* MUSE_TRANSCRIPT_MAX, in PSRAM where there is some */
+static char *s_transcript_in;     /* the caller's text, made ASCII before the compare */
+static uint32_t s_transcript_version;
+static SemaphoreHandle_t s_transcript_lock;
 static muse_power_t s_power = { .battery_pct = -1 };
 static volatile bool s_as_if_battery;
 
@@ -56,8 +63,14 @@ static float secs_since(int64_t us)
 
 void muse_state_init(void)
 {
-    static StaticSemaphore_t lock;
+    static StaticSemaphore_t lock, tlock;
     s_format_lock = xSemaphoreCreateMutexStatic(&lock);
+    s_transcript_lock = xSemaphoreCreateMutexStatic(&tlock);
+    s_transcript = heap_caps_calloc(2, MUSE_TRANSCRIPT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_transcript) {
+        s_transcript = calloc(2, MUSE_TRANSCRIPT_MAX);
+    }
+    s_transcript_in = s_transcript ? s_transcript + MUSE_TRANSCRIPT_MAX : NULL;
     static StaticEventGroup_t wake;
     s_wake = xEventGroupCreateStatic(&wake);
     xEventGroupSetBits(s_wake, AWAKE_BIT);
@@ -136,6 +149,48 @@ bool muse_state_caption(char *out, size_t out_len, uint32_t *version)
         changed = true;
     }
     portEXIT_CRITICAL(&s_lock);
+    return changed;
+}
+
+void muse_state_set_heard(const char *text)
+{
+    char buf[MUSE_HEARD_MAX];
+    strlcpy(buf, text ? text : "", sizeof(buf));
+    muse_text_to_ascii(buf, sizeof(buf));
+    xSemaphoreTake(s_transcript_lock, portMAX_DELAY);
+    if (strcmp(buf, s_heard) != 0) {
+        memcpy(s_heard, buf, sizeof(s_heard));
+        s_transcript_version++;
+    }
+    xSemaphoreGive(s_transcript_lock);
+}
+
+void muse_state_set_transcript(const char *text)
+{
+    if (!s_transcript) {
+        return;
+    }
+    xSemaphoreTake(s_transcript_lock, portMAX_DELAY);
+    strlcpy(s_transcript_in, text ? text : "", MUSE_TRANSCRIPT_MAX);
+    muse_text_to_ascii(s_transcript_in, MUSE_TRANSCRIPT_MAX);   /* replies have curly quotes and dashes */
+    if (strcmp(s_transcript_in, s_transcript) != 0) {
+        memcpy(s_transcript, s_transcript_in, MUSE_TRANSCRIPT_MAX);
+        s_transcript_version++;
+    }
+    xSemaphoreGive(s_transcript_lock);
+}
+
+bool muse_state_transcript(char *heard, size_t heard_len, char *reply, size_t reply_len, uint32_t *version)
+{
+    bool changed = false;
+    xSemaphoreTake(s_transcript_lock, portMAX_DELAY);
+    if (*version != s_transcript_version) {
+        strlcpy(heard, s_heard, heard_len);
+        strlcpy(reply, s_transcript ? s_transcript : "", reply_len);
+        *version = s_transcript_version;
+        changed = true;
+    }
+    xSemaphoreGive(s_transcript_lock);
     return changed;
 }
 

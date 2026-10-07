@@ -42,6 +42,7 @@
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
 #include "muse_state.h"
+#include "muse_voice.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -109,6 +110,18 @@ static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the n
 static lv_obj_t *s_power_lbl;
 static lv_obj_t *s_caption_lbl;
 static lv_obj_t *s_reply_lbl;   /* full layout: the reply's page while answering */
+/* The tall layout's transcript: a box under Muse's feet with what it heard, dim, and its whole
+ * reply so far, scrolled by finger. It follows the newest text until the reader scrolls back,
+ * and stays up after the reply, longer with each scroll. */
+#define TRANSCRIPT_PAD_R 8
+#define TRANSCRIPT_HOLD_S 45.0f
+#define TRANSCRIPT_PAUSE_S 8.0f   /* a finger scroll pauses the following this long */
+static lv_obj_t *s_reply_box;
+static lv_obj_t *s_heard_lbl;
+static float s_user_scroll_until;   /* the reader scrolled: no following until then */
+static int s_follow_from;           /* where the line being said was last found */
+static float s_hold_until;
+static char *s_transcript;      /* MUSE_TRANSCRIPT_MAX */
 static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
@@ -376,6 +389,19 @@ static void invalidate_muse(void)
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color);
 
+/* The procedural art fills its grid but for the bottom rows; a sprite avatar overrides this. */
+__attribute__((weak)) void muse_pixel_blank_rows(int px, int *top, int *bottom)
+{
+    *top = 0;
+    *bottom = ART_BLANK_ROWS * (px / MUSE_PX_W);
+}
+
+/* The reply's area while answering: the transcript box where there is one, else the page. */
+static lv_obj_t *reply_area(void)
+{
+    return s_reply_box ? s_reply_box : s_reply_lbl;
+}
+
 /* A microphone from primitives: LVGL's symbol font has none. */
 static lv_obj_t *make_mic(lv_obj_t *parent, int size)
 {
@@ -422,6 +448,148 @@ static void set_mic_color(uint32_t color)
         lv_obj_t *part = lv_obj_get_child(s_mic_icon, i);
         lv_obj_set_style_bg_color(part, lv_color_hex(color), 0);
         lv_obj_set_style_arc_color(part, lv_color_hex(color), LV_PART_MAIN);
+    }
+}
+
+/* A finger on the box (our own scrolls come from a timer, with no input device active):
+ * the following pauses and the transcript stays up longer. */
+static void on_transcript_event(lv_event_t *e)
+{
+    (void)e;
+    if (!lv_indev_active()) {
+        return;
+    }
+    float now = (float)esp_timer_get_time() / 1e6f;
+    s_user_scroll_until = now + TRANSCRIPT_PAUSE_S;
+    s_hold_until = now + TRANSCRIPT_HOLD_S;
+}
+
+static lv_obj_t *make_transcript_label(uint32_t color)
+{
+    lv_obj_t *l = make_label(s_reply_box, &lv_font_unscii_16, color);
+    lv_obj_set_width(l, lv_pct(100));
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_line_space(l, CAPTION_LINE_SPACE, 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+    return l;
+}
+
+/* The transcript box: what Muse heard, dim, then its reply, in a column that scrolls. */
+static void build_transcript(lv_obj_t *face)
+{
+    s_transcript = heap_caps_malloc(MUSE_TRANSCRIPT_MAX, MUSE_BIG_CAPS);
+    if (s_transcript) {
+        s_transcript[0] = '\0';
+    }
+    s_reply_box = lv_obj_create(face);
+    lv_obj_remove_style_all(s_reply_box);
+    lv_obj_set_scroll_dir(s_reply_box, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_reply_box, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_bg_color(s_reply_box, lv_color_hex(COLOR_ACCENT), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(s_reply_box, LV_OPA_70, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(s_reply_box, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(s_reply_box, 2, LV_PART_SCROLLBAR);
+    /* A vertical drag stays in the box; a sideways one still swipes to the settings tile. */
+    lv_obj_remove_flag(s_reply_box, LV_OBJ_FLAG_SCROLL_CHAIN_VER | LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_set_flex_flow(s_reply_box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_reply_box, 8, 0);
+    lv_obj_set_style_pad_right(s_reply_box, TRANSCRIPT_PAD_R, 0);
+    lv_obj_add_event_cb(s_reply_box, on_transcript_event, LV_EVENT_SCROLL_BEGIN, NULL);
+    lv_obj_add_event_cb(s_reply_box, on_transcript_event, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_flag(s_reply_box, LV_OBJ_FLAG_HIDDEN);
+
+    s_heard_lbl = make_transcript_label(COLOR_DIM);
+    lv_obj_add_flag(s_heard_lbl, LV_OBJ_FLAG_HIDDEN);
+    s_reply_lbl = make_transcript_label(COLOR_CAPTION);
+}
+
+/* Where in the transcript the caption begins: the page being said starts with a whole wrapped
+ * line cut from the reply, and the Pi's "now saying" line is a sentence of it. -1: not there. */
+static int transcript_find(const char *caption)
+{
+    while (*caption == ' ') {
+        caption++;
+    }
+    size_t n = strcspn(caption, "\n");
+    while (n && caption[n - 1] == ' ') {
+        n--;
+    }
+    char key[80];
+    if (n >= sizeof(key)) {
+        n = sizeof(key) - 1;
+    }
+    if (n < 4) {
+        return -1;
+    }
+    memcpy(key, caption, n);
+    key[n] = '\0';
+    const char *hit = strstr(s_transcript + s_follow_from, key);   /* speech moves forward */
+    if (!hit) {
+        hit = strstr(s_transcript, key);
+    }
+    if (!hit && n > 32) {
+        key[32] = '\0';   /* the Pi may have trimmed the sentence's end */
+        hit = strstr(s_transcript, key);
+    }
+    return hit ? (int)(hit - s_transcript) : -1;
+}
+
+/* Scrolls the box so the line holding byte `at` of the reply sits a quarter of the way down. */
+static void transcript_show(int at)
+{
+    lv_obj_update_layout(s_reply_box);
+    lv_point_t p;
+    lv_label_get_letter_pos(s_reply_lbl, (uint32_t)at, &p);
+    int32_t y = lv_obj_get_y(s_reply_lbl) + p.y;   /* in the box's content, from its top */
+    int32_t target = y - lv_obj_get_content_height(s_reply_box) / 4;
+    int32_t now_y = lv_obj_get_scroll_y(s_reply_box);
+    int32_t max = now_y + lv_obj_get_scroll_bottom(s_reply_box);
+    target = LV_CLAMP(0, target, max < 0 ? 0 : max);
+    if (LV_ABS(target - now_y) >= 8) {
+        lv_obj_scroll_to_y(s_reply_box, target, LV_ANIM_ON);
+    }
+}
+
+/* Each frame while the transcript shows: new text goes in (the view stays put, so a long
+ * reply reads from its start), a new caption is found in it and, unless the reader just
+ * scrolled, the box follows the line being said. Before there's a reply, the caption says
+ * what's happening. */
+static void update_transcript(const char *caption, bool fresh, bool opened, float now)
+{
+    static char heard[MUSE_HEARD_MAX];
+    static uint32_t version;
+    bool changed = s_transcript && muse_state_transcript(heard, sizeof(heard), s_transcript, MUSE_TRANSCRIPT_MAX, &version);
+    if (opened) {
+        s_user_scroll_until = 0;
+        s_follow_from = 0;
+        lv_obj_scroll_to_y(s_reply_box, 0, LV_ANIM_OFF);
+        lv_obj_remove_flag(s_reply_box, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_caption_lbl, LV_OBJ_FLAG_HIDDEN);
+        changed = fresh = true;
+    }
+    if (!changed && !fresh) {
+        return;
+    }
+    if (changed) {
+        if (heard[0]) {
+            lv_label_set_text_fmt(s_heard_lbl, "\"%s\"", heard);
+        }
+        lv_obj_set_flag(s_heard_lbl, LV_OBJ_FLAG_HIDDEN, !heard[0]);
+    }
+    bool have = s_transcript && s_transcript[0];
+    if (changed || !have) {
+        lv_label_set_text(s_reply_lbl, have ? s_transcript : caption);
+        lv_obj_set_style_text_color(s_reply_lbl, lv_color_hex(have ? COLOR_CAPTION : COLOR_DIM), 0);
+        lv_obj_set_flag(s_reply_lbl, LV_OBJ_FLAG_HIDDEN, !have && !caption[0]);
+    }
+    if (have && fresh && caption[0]) {
+        int at = transcript_find(caption);
+        if (at >= 0) {
+            s_follow_from = at;
+            if (now >= s_user_scroll_until) {
+                transcript_show(at);
+            }
+        }
     }
 }
 
@@ -601,8 +769,8 @@ static void set_answer(int which)
         }
     }
     if (l) {
-        lv_obj_set_size(s_reply_lbl, l->w, l->h);
-        lv_obj_align(s_reply_lbl, LV_ALIGN_CENTER, 0, l->top + l->h / 2);
+        lv_obj_set_size(reply_area(), l->w, l->h);
+        lv_obj_align(reply_area(), LV_ALIGN_CENTER, 0, l->top + l->h / 2);
         lv_obj_set_style_text_align(s_reply_lbl, l->align, 0);
     }
     move_muse(l ? l->px : s_canvas_px, l ? l->y : s_big_y);
@@ -900,9 +1068,40 @@ static void build_screen(void)
         lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, 0);
         lv_obj_align(s_bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         if (s_tall && s_w >= 200) {
+            const int pitch = 16 + CAPTION_LINE_SPACE;
+            /* Room under the full-size figure (its canvas's blank rows don't count) for some
+             * lines of the 16 px pixel font (320x480): Muse stays big, moved up under the
+             * status row, and the whole reply scrolls under its feet, above the mic icon
+             * and page dots. */
+            int blank_top, blank_bottom;
+            muse_pixel_blank_rows(s_canvas_px, &blank_top, &blank_bottom);
+            const int canvas_top = 20 - blank_top;
+            const int box_top = canvas_top + s_canvas_px - blank_bottom + 6, box_bottom = s_h - 34;
+            if (box_bottom - box_top >= 6 * pitch) {
+                for (int k = 0; k < 2; k++) {
+                    answer_layout_t *l = &s_answers[k];
+                    l->px = s_canvas_px;
+                    l->y = canvas_top + s_canvas_px / 2 - s_h / 2;
+                    l->w = s_w - 12;
+                    l->h = box_bottom - box_top;
+                    l->top = box_top - s_h / 2;
+                    l->cols = (l->w - TRANSCRIPT_PAD_R) / 8;
+                    /* The box shows the whole reply; the voice task's pages, which the caption
+                     * follows, are three lines (two new ones each turn) so the following keeps
+                     * up with the speech. */
+                    l->lines = 3;
+                    l->align = LV_TEXT_ALIGN_LEFT;
+                    l->hides[0] = s_state_lbl;
+                    l->hides[1] = s_name_lbl;
+                    l->hides[2] = s_caption_lbl;
+                }
+                build_transcript(face);
+                ESP_LOGI(TAG, "transcript: %d x %d px under a %d px Muse", s_answers[0].w, s_answers[0].h, s_canvas_px);
+                return;
+            }
             /* Tall enough (240x320) for a real reply page: Muse shrinks to one art pixel per
              * pixel at the top and the reply, in the 16 px pixel font, takes the rest. */
-            const int px = MUSE_PX_W, pitch = 16 + CAPTION_LINE_SPACE;
+            const int px = MUSE_PX_W;
             const int muse_y = 8 + px / 2, top = 8 + px + 10, bottom = s_h - 44;
             for (int k = 0; k < 2; k++) {
                 answer_layout_t *l = &s_answers[k];
@@ -1416,18 +1615,27 @@ static void update_status(muse_mode_t mode, float now)
         }
         if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
             answer = layout;
+            s_hold_until = now + TRANSCRIPT_HOLD_S;
+        } else if (s_reply_box && s_answer >= 0 && mode == MUSE_MODE_IDLE && now < s_hold_until &&
+                   !(fresh && caption[0] && !muse_voice_stream_active())) {
+            /* The transcript stays to be read, until a press, or a caption with news (an
+             * error; not the Pi's "now saying" line, which comes with its speech). */
+            answer = s_answer;
         }
     }
+    bool opened = answer >= 0 && s_answer < 0;
     if (answer != s_answer) {
         set_answer(answer);
         fresh = true;   /* the caption moves between labels */
     }
-    if (fresh) {
+    if (s_reply_box && answer >= 0) {
+        update_transcript(caption, fresh, opened, now);
+    } else if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
         lv_label_set_text(lbl, caption);
         lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
         if (s_reply_lbl) {
-            lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(answer >= 0 ? s_caption_lbl : reply_area(), LV_OBJ_FLAG_HIDDEN);
         }
     }
     update_power(now);

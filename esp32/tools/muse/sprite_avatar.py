@@ -269,6 +269,15 @@ void muse_pixel_set_size(int px)
     }
 }
 
+void muse_pixel_blank_rows(int px, int *top, int *bottom)
+{
+    int k = px / SPR_W;
+    float kf = k >= 1 ? (float)k : (float)px / SPR_W;
+    int h = (int)(SPR_H * kf + 0.5f);
+    *top = (px - h) / 2;
+    *bottom = px - h - *top;
+}
+
 void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1)
 {
     const uint8_t *frame = s_frame;

@@ -265,6 +265,8 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
+    muse_state_set_heard("");
+    muse_state_set_transcript("");   /* the last turn's transcript leaves the screen */
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
@@ -435,6 +437,7 @@ static bool hatch_reply(bool *delivered)
     static char page[MUSE_CAPTION_MAX];
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
+    float peak = 0;
     int64_t t0 = esp_timer_get_time();
     bool mute = link_client();
     *delivered = false;
@@ -443,6 +446,7 @@ static bool hatch_reply(bool *delivered)
         while ((ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
             switch (ev) {
             case MUSE_HATCH_EV_HEARD:
+                muse_state_set_heard(text);
                 if (!speaking && !replied) {
                     muse_state_set_caption("\"%s\"", text);
                 }
@@ -491,7 +495,9 @@ static bool hatch_reply(bool *delivered)
                 muse_state_set_mode(MUSE_MODE_SPEAKING);
                 ESP_LOGI(TAG, "reply audio after %.2fs", (esp_timer_get_time() - t0) / 1e6);
             }
-            muse_state_set_level(muse_audio_level(buf, n));
+            float level = muse_audio_level(buf, n);
+            peak = level > peak ? level : peak;
+            muse_state_set_level(level);
             muse_audio_write(buf, n);
             played += n;
         } else if (done) {
@@ -507,8 +513,8 @@ static bool hatch_reply(bool *delivered)
         }
     }
     muse_state_set_level(0);
-    ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total", (double)played / MUSE_AUDIO_RATE,
-             (esp_timer_get_time() - t0) / 1e6);
+    ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total, peak level %.2f%s", (double)played / MUSE_AUDIO_RATE,
+             (esp_timer_get_time() - t0) / 1e6, (double)peak, mute ? " (muted: the Pi speaks)" : "");
     if (!played) {
         /* No speech (TTS unavailable): the screen reads it out instead. */
         muse_state_set_mode(MUSE_MODE_SPEAKING);

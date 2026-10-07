@@ -68,6 +68,18 @@ bool muse_state_caption(char *out, size_t out_len, uint32_t *version);
 void muse_state_set_page(int cols, int lines);
 void muse_state_page(int *cols, int *lines);
 
+/*
+ * The turn on screen, for a layout that scrolls the whole reply under the
+ * avatar (muse_ui.c's tall layout): what Muse heard and its reply so far, as
+ * the chat session streams it in. Both clear when the next note is recorded.
+ */
+#define MUSE_HEARD_MAX 200
+#define MUSE_TRANSCRIPT_MAX 4096
+void muse_state_set_heard(const char *text);        /* "" clears */
+void muse_state_set_transcript(const char *text);   /* the reply so far; "" clears */
+/* Copies both if either changed since *version; returns true on change. */
+bool muse_state_transcript(char *heard, size_t heard_len, char *reply, size_t reply_len, uint32_t *version);
+
 void muse_state_set_power(const muse_power_t *power);
 muse_power_t muse_state_power(void);
 /* A battery and no USB power (charger or computer). Power saving asleep (the
