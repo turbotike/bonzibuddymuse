@@ -53,7 +53,7 @@
 
 #define NS "pet"
 #define SAVE_MAGIC 0x50455431u   /* "PET1" */
-#define SAVE_VERSION 1
+#define SAVE_VERSION 3   /* 3: power and theme */
 #define SAVE_EVERY_S 300
 #define OFFLINE_MAX_MIN (7 * 24 * 60)
 #define EGG_AUTO_HATCH_MIN (6 * 60)
@@ -99,7 +99,8 @@ typedef struct {
     uint8_t poops;
     uint8_t medicine;        /* doses taken this illness */
     uint8_t next_variant;    /* Muse's pick for the next evolution, 0 = by care */
-    uint8_t pad[2];
+    uint8_t theme;
+    uint8_t pad;
     float needs[PET_NEED_COUNT];
     float health;
     float care_acc, care_n;  /* average of the needs over this stage */
@@ -107,6 +108,7 @@ typedef struct {
     float age_min;
     float zero_health_min;
     float digest_min;        /* minutes until the next poop, 0 = none coming */
+    float power;             /* 0..100, from training; fades slowly */
     int64_t last_ts;         /* unix time at the last tick, 0 = unknown */
     uint32_t feeds, plays, cleans;
     char name[16];
@@ -189,25 +191,72 @@ static void make_genome(pet_genome_t *g, uint32_t seed, const pet_genome_t *pare
     uint32_t x = seed;
     memset(g, 0, sizeof(*g));
     g->seed = seed;
-    g->body_w = rnd(&x, 22, 36);
-    g->body_h = rnd(&x, 20, 34);
-    g->shape = rnd(&x, 0, 4);
+    g->species = (uint8_t)rnd(&x, 0, PET_SP_COUNT - 1);
+    if (parent && rnd(&x, 0, 2)) {
+        g->species = parent->species;   /* mostly its parent's kind */
+    }
+    g->size = (uint8_t)rnd(&x, 96, 170);
+    g->head_size = (uint8_t)rnd(&x, 100, 170);
+    g->tail_len = (uint8_t)rnd(&x, 90, 180);
     int r = rnd(&x, 0, 99);
-    g->eye_n = r < 70 ? 2 : r < 85 ? 1 : 3;
-    g->eye_size = rnd(&x, 2, 5);
-    g->mouth = rnd(&x, 0, 3);
-    g->head = rnd(&x, 0, 5);
-    g->limb = rnd(&x, 0, 5);
-    g->tail = rnd(&x, 0, 3);
-    g->pattern = rnd(&x, 0, 3);
-    g->hue = rnd(&x, 0, 255);
+    g->eye_n = r < 70 ? 2 : r < 90 ? 1 : 3;
+    g->eye_size = (uint8_t)rnd(&x, 2, 5);
+    g->pattern = (uint8_t)rnd(&x, 0, 2);
+    switch (g->species) {
+    case PET_SP_REX:
+        g->neck = (uint8_t)rnd(&x, 40, 90);
+        g->jaw = (uint8_t)rnd(&x, 0, 1);
+        g->teeth = (uint8_t)rnd(&x, 1, 2);
+        g->crest = rnd(&x, 0, 3) == 0 ? 1 : 0;
+        g->back = rnd(&x, 0, 2) == 0 ? 1 : 0;
+        break;
+    case PET_SP_RAPTOR:
+        g->neck = (uint8_t)rnd(&x, 60, 110);
+        g->jaw = 1;
+        g->teeth = (uint8_t)rnd(&x, 1, 2);
+        g->crest = 3;
+        g->tail_tip = rnd(&x, 0, 1) ? 3 : 0;
+        break;
+    case PET_SP_SAUROPOD:
+        g->neck = (uint8_t)rnd(&x, 170, 255);
+        g->back = rnd(&x, 0, 2) == 0 ? 4 : 0;
+        g->tail_len = (uint8_t)rnd(&x, 160, 230);
+        break;
+    case PET_SP_STEGO:
+        g->neck = (uint8_t)rnd(&x, 40, 80);
+        g->jaw = rnd(&x, 0, 2) == 0 ? 2 : 0;
+        g->back = 2;
+        g->tail_tip = 2;
+        break;
+    case PET_SP_CERATOPS:
+        g->neck = (uint8_t)rnd(&x, 30, 60);
+        g->jaw = 2;
+        g->crest = 4;
+        g->tail_len = (uint8_t)rnd(&x, 60, 110);
+        break;
+    case PET_SP_ANKYLO:
+        g->neck = (uint8_t)rnd(&x, 30, 60);
+        g->crest = rnd(&x, 0, 1) ? 2 : 0;
+        g->back = 4;
+        g->tail_tip = 1;
+        break;
+    default:   /* ptero */
+        g->neck = (uint8_t)rnd(&x, 70, 120);
+        g->jaw = rnd(&x, 0, 1) ? 1 : 2;
+        g->teeth = (uint8_t)rnd(&x, 0, 1);
+        g->crest = 5;
+        g->tail_tip = rnd(&x, 0, 1) ? 3 : 0;
+        g->tail_len = (uint8_t)rnd(&x, 50, 100);
+        break;
+    }
+    g->hue = (uint8_t)rnd(&x, 0, 255);
     if (parent) {
         g->hue = (uint8_t)(parent->hue + rnd(&x, -24, 24));   /* the family colour */
     }
-    g->hue2 = (uint8_t)(g->hue + rnd(&x, 60, 200));
-    g->eye_hue = rnd(&x, 0, 255);
-    g->sat = rnd(&x, 150, 255);
-    g->voice = rnd(&x, 0, 255);
+    g->hue2 = (uint8_t)(g->hue + rnd(&x, 70, 190));
+    g->eye_hue = (uint8_t)rnd(&x, 0, 255);
+    g->sat = (uint8_t)rnd(&x, 160, 255);
+    g->voice = (uint8_t)rnd(&x, 0, 255);
     g->traits = (uint8_t)(1u << rnd(&x, 0, 3));
     if (rnd(&x, 0, 1)) {
         g->traits |= (uint8_t)(1u << rnd(&x, 0, 3));
@@ -221,34 +270,51 @@ static const char *hue_word(uint8_t hue)
     return NAMES[(hue + 10) * 12 / 256 % 12];
 }
 
-static const char *shape_word(uint8_t shape)
+const char *pet_species_name(pet_species_t sp)
 {
-    static const char *const NAMES[] = { "round", "tall", "wide", "pear-shaped", "boxy" };
-    return NAMES[shape % 5];
+    static const char *const NAMES[PET_SP_COUNT] = { "rex", "raptor", "long-neck", "stego", "tri-horn", "ankylo", "ptero" };
+    return (int)sp >= 0 && sp < PET_SP_COUNT ? NAMES[sp] : "?";
 }
 
-static const char *head_word(uint8_t head)
+static bool two_legged(uint8_t species)
 {
-    static const char *const NAMES[] = { "", "ears", "horns", "antennae", "a crest", "a fin" };
-    return NAMES[head % 6];
+    return species == PET_SP_REX || species == PET_SP_RAPTOR || species == PET_SP_PTERO;
 }
 
-static const char *limb_word(uint8_t limb)
+static const char *jaw_word(uint8_t jaw)
 {
-    static const char *const NAMES[] = { "no limbs", "stubby feet", "little legs", "arms and legs", "fins", "wings" };
-    return NAMES[limb % 6];
+    static const char *const NAMES[] = { "a round snout", "a long snout", "a beak" };
+    return NAMES[jaw % 3];
 }
 
-static const char *tail_word(uint8_t tail)
+static const char *teeth_word(uint8_t teeth)
 {
-    static const char *const NAMES[] = { "", "a stubby tail", "a long tail", "a flame tail" };
-    return NAMES[tail % 4];
+    static const char *const NAMES[] = { "", "teeth", "big fangs" };
+    return NAMES[teeth % 3];
+}
+
+static const char *crest_word(uint8_t crest)
+{
+    static const char *const NAMES[] = { "", "a nose horn", "brow horns", "a feather crest", "a frill and horns", "a long head crest" };
+    return NAMES[crest % 6];
+}
+
+static const char *back_word(uint8_t back)
+{
+    static const char *const NAMES[] = { "", "spikes down its back", "plates down its back", "a sail on its back", "armour bumps" };
+    return NAMES[back % 5];
+}
+
+static const char *tail_word(uint8_t tip)
+{
+    static const char *const NAMES[] = { "a plain tail", "a club tail", "a spiked tail", "a tufted tail" };
+    return NAMES[tip % 4];
 }
 
 static const char *pattern_word(uint8_t pattern)
 {
-    static const char *const NAMES[] = { "", "a pale belly", "spots", "stripes" };
-    return NAMES[pattern % 4];
+    static const char *const NAMES[] = { "", "spots", "stripes" };
+    return NAMES[pattern % 3];
 }
 
 static const char *trait_words(uint8_t t, char *buf, size_t cap)
@@ -264,32 +330,44 @@ static const char *trait_words(uint8_t t, char *buf, size_t cap)
     return buf[0] ? buf : "easy-going";
 }
 
-/* "a small round teal creature with two big eyes, antennae and a stubby tail" */
+/* "a small two-legged teal rex dino with a cream belly, a long snout, big fangs, a feather crest..." */
 static void describe(char *out, size_t cap)
 {
     const pet_genome_t *g = &s.g;
+    char traits[48];
     if (s.stage == PET_EGG) {
-        snprintf(out, cap, "a %s speckled egg", hue_word(g->hue));
+        snprintf(out, cap, "a %s speckled egg (a %s dino is inside)", hue_word(g->hue), pet_species_name(g->species));
         return;
     }
-    static const char *const SIZE[PET_STAGE_COUNT] = { "", "tiny", "small", "half-grown", "full-grown", "old" };
-    char eyes[32], traits[48];
-    snprintf(eyes, sizeof(eyes), "%s %s eye%s", g->eye_n == 1 ? "one" : g->eye_n == 2 ? "two" : "three",
-             g->eye_size >= 4 ? "big" : "small", g->eye_n == 1 ? "" : "s");
-    int n = snprintf(out, cap, "a %s %s %s creature with %s", SIZE[s.stage], shape_word(g->shape), hue_word(g->hue), eyes);
-    if (s.stage >= PET_TEEN && g->head) {
-        n += snprintf(out + n, n < (int)cap ? cap - n : 0, ", %s", head_word(g->head));
+    if (s.stage == PET_BABY) {
+        snprintf(out, cap, "a tiny round %s in-training blob with %s eyes, a baby %s dino that hasn't grown its body yet; %s by nature",
+                 hue_word(g->hue), g->eye_n == 1 ? "one" : g->eye_n == 2 ? "two" : "three", pet_species_name(g->species),
+                 trait_words(g->traits, traits, sizeof(traits)));
+        return;
     }
-    if (s.stage >= PET_KID) {
-        n += snprintf(out + n, n < (int)cap ? cap - n : 0, ", %s", limb_word(s.stage == PET_KID && g->limb > 1 ? 1 : g->limb));
+    static const char *const SIZE[PET_STAGE_COUNT] = { "", "", "small chibi", "half-grown", "full-grown", "old" };
+    int n = snprintf(out, cap, "a %s %s %s %s dino with a cream belly, %s eyes and %s", SIZE[s.stage],
+                     two_legged(g->species) ? (g->species == PET_SP_PTERO ? "winged" : "two-legged") : "four-legged",
+                     hue_word(g->hue), pet_species_name(g->species), g->eye_n == 1 ? "one" : g->eye_n == 2 ? "two" : "three",
+                     jaw_word(g->jaw));
+#define ADD(fmt, ...) n += snprintf(out + n, n < (int)cap ? cap - n : 0, fmt, __VA_ARGS__)
+    if (g->teeth && s.stage >= PET_TEEN) {
+        ADD(", %s", teeth_word(g->teeth));
     }
-    if (s.stage >= PET_ADULT && g->tail) {
-        n += snprintf(out + n, n < (int)cap ? cap - n : 0, ", %s", tail_word(g->tail));
+    if (s.stage >= PET_TEEN && g->crest) {
+        ADD(", %s", crest_word(g->crest));
     }
-    if (s.stage >= PET_ADULT && g->pattern) {
-        n += snprintf(out + n, n < (int)cap ? cap - n : 0, " and %s", pattern_word(g->pattern));
+    if (s.stage >= PET_TEEN && g->back) {
+        ADD(", %s", back_word(g->back));
     }
-    snprintf(out + n, n < (int)cap ? cap - n : 0, "; %s by nature", trait_words(g->traits, traits, sizeof(traits)));
+    if (s.stage >= PET_ADULT) {
+        ADD(", %s", tail_word(g->tail_tip));
+        if (g->pattern) {
+            ADD(" and %s %s", hue_word(g->hue2), pattern_word(g->pattern));
+        }
+    }
+    ADD("; %s by nature", trait_words(g->traits, traits, sizeof(traits)));
+#undef ADD
 }
 
 /* ---- sounds: little chirps in the creature's own pitch --------------------- */
@@ -548,36 +626,42 @@ static void evolve(int variant)
     uint32_t x = g->seed ^ (0x51edu * (s.stage + 1));
     int care = s.care_n > 0 ? (int)(s.care_acc / s.care_n) : 60;
     if (variant <= 0) {
-        variant = care >= 75 ? 1 : care >= 45 ? 2 : 3;
+        variant = care >= 65 && s.power >= 45 ? 1 : care >= 45 ? 2 : 3;
     }
     switch (variant) {
-    case 1:   /* noble: horns or a crest, brighter, a long tail, a pale belly */
-        g->head = rnd(&x, 0, 1) ? 2 : 4;
+    case 1:   /* noble: a grander crest and back, brighter, bigger */
+        if (g->crest == 0 || g->crest == 1) {
+            g->crest = rnd(&x, 0, 1) ? 2 : 3;
+        }
+        if (g->species == PET_SP_CERATOPS) {
+            g->crest = 4;
+        }
+        if (g->back == 0 || g->back == 4) {
+            g->back = rnd(&x, 0, 1) ? 2 : 3;
+        }
         g->sat = (uint8_t)(g->sat > 215 ? 255 : g->sat + 40);
-        if (s.stage >= PET_TEEN) {
-            g->tail = 2;
-            g->pattern = 1;
-        }
-        g->mouth = g->mouth == 2 ? 0 : g->mouth;
+        g->tail_tip = g->tail_tip == 0 ? 3 : g->tail_tip;
+        g->teeth = g->teeth == 2 ? 1 : g->teeth;
+        g->size = (uint8_t)(g->size > 235 ? 255 : g->size + 20);
         break;
-    case 2:   /* cute: ears, bigger eyes, rounder, spots */
-        g->head = 1;
+    case 2:   /* cute: bigger eyes and head, a round snout, no teeth, spots */
         g->eye_size = (uint8_t)(g->eye_size < 5 ? g->eye_size + 1 : 5);
-        g->shape = 0;
-        if (s.stage >= PET_TEEN) {
-            g->pattern = 2;
-            g->tail = 1;
-        }
-        g->mouth = 0;
+        g->head_size = (uint8_t)(g->head_size > 225 ? 255 : g->head_size + 30);
+        g->jaw = g->jaw == 1 ? 0 : g->jaw;
+        g->teeth = 0;
+        g->pattern = 1;
+        g->crest = g->crest == 0 ? 3 : g->crest;
+        g->back = g->back == 1 ? 4 : g->back;
         break;
-    default:   /* feral: fangs, spikes, stripes, darker, a flame tail */
-        g->head = 4;
-        g->mouth = 2;
+    default:   /* feral: fangs, spikes, a spiked tail, stripes, darker */
+        g->teeth = 2;
+        g->jaw = g->jaw == 2 ? 2 : 1;
+        g->back = (g->back == 0 || g->back == 4) ? 1 : g->back;
+        g->tail_tip = 2;
+        g->pattern = 2;
         g->sat = (uint8_t)(g->sat < 190 ? 150 : g->sat - 40);
-        if (s.stage >= PET_TEEN) {
-            g->pattern = 3;
-            g->tail = 3;
-        }
+        g->crest = g->crest == 0 ? 1 : g->crest == 3 ? 2 : g->crest;
+        g->size = (uint8_t)(g->size > 245 ? 255 : g->size + 10);
         break;
     }
     s.stage++;
@@ -646,6 +730,7 @@ static event_t advance(float dt_min, bool offline)
     if (!was_hungry && s.needs[PET_NEED_FOOD] < 30) {
         ev = EV_HUNGRY;
     }
+    s.power = clampf(s.power - 0.6f / 60.0f * dt_min, 0, 100);   /* training wears off over days */
     /* Digestion. */
     if (s.digest_min > 0) {
         s.digest_min -= dt_min;
@@ -755,12 +840,12 @@ bool pet_report(const char *reason)
     describe(desc, sizeof(desc));
     snprintf(status, sizeof(status),
              "food %d (%s), energy %d (%s), fun %d (%s), clean %d (%s), bond %d (%s); health %d%s; mood %s; "
-             "%s; age %uh%02um; %u poop%s on the floor",
+             "%s; age %uh%02um; %u poop%s on the floor; power %d (from training)",
              (int)s.needs[0], need_state(s.needs[0]), (int)s.needs[1], need_state(s.needs[1]), (int)s.needs[2],
              need_state(s.needs[2]), (int)s.needs[3], need_state(s.needs[3]), (int)s.needs[4], need_state(s.needs[4]),
              (int)s.health, s.sick ? " (SICK, needs medicine)" : "", pet_mood_name(s_mood),
              s_asleep ? "asleep" : "awake", (unsigned)(s.age_min / 60), (unsigned)s.age_min % 60, (unsigned)s.poops,
-             s.poops == 1 ? "" : "s");
+             s.poops == 1 ? "" : "s", (int)s.power);
     char name[16];
     strlcpy(name, s.name[0] ? s.name : "the unnamed pet", sizeof(name));
     pet_stage_t stage = s.stage;
@@ -982,6 +1067,8 @@ void pet_view(pet_view_t *out)
     out->generation = s.generation;
     strlcpy(out->name, s.name, sizeof(out->name));
     out->care = (uint8_t)(s.care_n > 0 ? s.care_acc / s.care_n : 60);
+    out->power = (uint8_t)(s.power + 0.5f);
+    out->theme = s.theme;
     unlock();
 }
 
@@ -1027,6 +1114,40 @@ bool pet_play(int score)
     unlock();
     play(SND_PLAY);
     return true;
+}
+
+bool pet_train(int hits, int rounds)
+{
+    lock();
+    if (s.stage == PET_EGG || s_asleep) {
+        unlock();
+        return false;
+    }
+    hits = hits < 0 ? 0 : hits > rounds ? rounds : hits;
+    s.needs[PET_NEED_FUN] = clampf(s.needs[PET_NEED_FUN] + 10 + 4 * hits, 0, 100);
+    s.needs[PET_NEED_BOND] = clampf(s.needs[PET_NEED_BOND] + 3, 0, 100);
+    s.needs[PET_NEED_ENERGY] = clampf(s.needs[PET_NEED_ENERGY] - 10, 0, 100);
+    s.power = clampf(s.power + 4 * hits + (rounds - hits), 0, 100);
+    s.plays++;
+    s_dirty = true;
+    bool good = hits * 2 >= rounds;
+    set_anim(good ? PET_ANIM_HAPPY : PET_ANIM_SAD, 3.0f);
+    unlock();
+    play(good ? SND_PLAY : SND_SAD);
+    return true;
+}
+
+void pet_set_theme(int theme)
+{
+    lock();
+    s.theme = (uint8_t)(theme < 0 ? 0 : theme);
+    save_now();
+    unlock();
+}
+
+int pet_theme(void)
+{
+    return s.theme;
 }
 
 bool pet_clean(void)
@@ -1221,14 +1342,65 @@ int pet_status_json(char *out, size_t cap)
                      "{\"name\":\"%s\",\"generation\":%u,\"stage\":\"%s\",\"age_min\":%u,\"mood\":\"%s\",\"asleep\":%s,"
                      "\"sick\":%s,\"lights_off\":%s,\"health\":%d,\"needs\":{\"food\":%d,\"energy\":%d,\"fun\":%d,"
                      "\"clean\":%d,\"bond\":%d},\"poops\":%u,\"care\":%d,\"egg_warmth\":%.2f,\"looks\":\"%s\","
-                     "\"traits\":%u,\"feeds\":%u,\"plays\":%u,\"cleans\":%u,\"time_scale\":%d,\"last_said\":\"%s\"}",
+                     "\"traits\":%u,\"feeds\":%u,\"plays\":%u,\"cleans\":%u,\"time_scale\":%d,\"power\":%d,\"theme\":%u,\"last_said\":\"%s\"}",
                      s.name, (unsigned)s.generation, pet_stage_name(s.stage), (unsigned)s.age_min, pet_mood_name(s_mood),
                      s_asleep ? "true" : "false", s.sick ? "true" : "false", s.lights_off ? "true" : "false", (int)s.health,
                      (int)s.needs[0], (int)s.needs[1], (int)s.needs[2], (int)s.needs[3], (int)s.needs[4], (unsigned)s.poops,
                      (int)(s.care_n > 0 ? s.care_acc / s.care_n : 60), (double)s.egg_warmth, desc, (unsigned)s.g.traits,
-                     (unsigned)s.feeds, (unsigned)s.plays, (unsigned)s.cleans, s_time_scale, s_last_said);
+                     (unsigned)s.feeds, (unsigned)s.plays, (unsigned)s.cleans, s_time_scale, (int)s.power, (unsigned)s.theme,
+                     s_last_said);
     unlock();
     return n;
+}
+
+bool pet_debug_stage(pet_stage_t stage)
+{
+    if ((int)stage < 0 || stage >= PET_STAGE_COUNT) {
+        return false;
+    }
+    lock();
+    if (stage == PET_EGG) {
+        pet_genome_t parent = s.g;
+        lay_egg(&parent, s.generation);
+    } else {
+        if (s.stage == PET_EGG) {
+            hatch();
+        }
+        s.stage = (uint8_t)stage;
+        s.age_min = stage > PET_BABY ? (float)STAGE_END_MIN[stage - 1] : 0;
+        s.care_acc = s.care_n = 0;
+        set_anim(PET_ANIM_EVOLVE, 3.5f);
+    }
+    save_now();
+    unlock();
+    play(SND_EVOLVE);
+    return true;
+}
+
+bool pet_debug_species(int species)
+{
+    if (species < 0 || species >= PET_SP_COUNT) {
+        return false;
+    }
+    lock();
+    pet_genome_t parent = s.g, g;
+    lay_egg(&parent, s.generation);
+    for (int i = 0; i < 64; i++) {
+        make_genome(&g, esp_random(), NULL);
+        if (g.species == species) {
+            break;
+        }
+    }
+    g.species = (uint8_t)species;
+    s.g = g;
+    hatch();
+    s.stage = PET_ADULT;
+    s.age_min = (float)STAGE_END_MIN[PET_TEEN];
+    s.care_acc = s.care_n = 0;
+    set_anim(PET_ANIM_IDLE, 0);
+    save_now();
+    unlock();
+    return true;
 }
 
 const char *pet_stage_name(pet_stage_t st)

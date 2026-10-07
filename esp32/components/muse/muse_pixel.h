@@ -63,3 +63,6 @@ void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int 
  * avatar centred in the square overrides it.
  */
 void muse_pixel_blank_rows(int px, int *top, int *bottom);
+
+/* The colour behind the figure (RGB565), so the canvas melts into the screen's LCD. */
+void muse_pixel_set_background(uint16_t rgb565);

@@ -72,17 +72,26 @@ typedef enum {
 #define PET_TRAIT_SOCIAL 0x04
 #define PET_TRAIT_GREEDY 0x08
 
+/* Species: the body plan. */
+typedef enum { PET_SP_REX, PET_SP_RAPTOR, PET_SP_SAUROPOD, PET_SP_STEGO, PET_SP_CERATOPS, PET_SP_ANKYLO, PET_SP_PTERO, PET_SP_COUNT } pet_species_t;
+
+/* A dinosaur, Digimon style: an in-training blob as a baby, then a chibi dino
+ * that grows into its species, picking up its crest, back and tail features. */
 typedef struct {
     uint32_t seed;
-    uint8_t body_w, body_h;   /* adult size, art pixels (of the 64-px grid) */
-    uint8_t shape;            /* 0 round, 1 tall, 2 wide, 3 pear, 4 boxy */
+    uint8_t species;          /* pet_species_t */
+    uint8_t size;             /* 0..255: build, around 128 */
+    uint8_t head_size;        /* 0..255 */
+    uint8_t neck;             /* 0..255: neck length (the species sets the range) */
+    uint8_t tail_len;         /* 0..255 */
     uint8_t eye_n;            /* 1..3 */
     uint8_t eye_size;         /* 2..5 */
-    uint8_t mouth;            /* 0 smile, 1 beak, 2 fangs, 3 flat */
-    uint8_t head;             /* 0 none, 1 ears, 2 horns, 3 antennae, 4 crest, 5 fin */
-    uint8_t limb;             /* 0 none, 1 stubs, 2 legs, 3 arms and legs, 4 fins, 5 wings */
-    uint8_t tail;             /* 0 none, 1 stub, 2 long, 3 flame */
-    uint8_t pattern;          /* 0 plain, 1 belly, 2 spots, 3 stripes */
+    uint8_t jaw;              /* 0 round snout, 1 long snout, 2 beak */
+    uint8_t teeth;            /* 0 none, 1 some, 2 fangs */
+    uint8_t crest;            /* 0 none, 1 nose horn, 2 brow horns, 3 feather crest, 4 frill and horns, 5 long head crest */
+    uint8_t back;             /* 0 smooth, 1 spikes, 2 plates, 3 sail, 4 bumps */
+    uint8_t tail_tip;         /* 0 plain, 1 club, 2 spikes, 3 tuft */
+    uint8_t pattern;          /* 0 plain, 1 spots, 2 stripes (all have a cream belly) */
     uint8_t hue, hue2, eye_hue, sat;   /* 0..255 */
     uint8_t voice;            /* chirp pitch */
     uint8_t traits;           /* PET_TRAIT_* */
@@ -106,6 +115,8 @@ typedef struct {
     uint16_t generation;
     char name[16];
     uint8_t care;             /* 0..100, how well it has been looked after this stage */
+    uint8_t power;            /* 0..100, built by training; shapes the evolution */
+    uint8_t theme;            /* the screen's colour scheme, kept with the pet */
 } pet_view_t;
 
 void pet_init(void);
@@ -114,6 +125,9 @@ void pet_view(pet_view_t *out);
 /* Care, from the screen, from Muse's commands, or the pet's own routine. False: not now. */
 bool pet_feed(bool snack);
 bool pet_play(int score);       /* a finished game, score 0..10 */
+bool pet_train(int hits, int rounds);   /* Digimon-style training: hits of rounds */
+void pet_set_theme(int theme);  /* saved with the pet */
+int pet_theme(void);
 bool pet_clean(void);
 bool pet_medicine(void);
 bool pet_lights(bool off);
@@ -125,6 +139,12 @@ void pet_new_egg(void);
 /* Faster life for watching it grow: 1 = real time, up to 200. Not saved. */
 void pet_set_time_scale(int scale);
 int pet_time_scale(void);
+/* Testing: jump to a stage (the age moves with it). */
+bool pet_debug_stage(pet_stage_t stage);
+/* Testing: a fresh adult of that species (pet_species_t), a new creature. */
+bool pet_debug_species(int species);
+
+const char *pet_species_name(pet_species_t sp);
 
 /* A speech bubble on the screen (the UI shows it) plus a chirp. */
 void pet_say(const char *text, int secs);

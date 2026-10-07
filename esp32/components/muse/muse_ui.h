@@ -54,3 +54,5 @@ void muse_ui_camera_hint(bool visible);
 
 /* Bench testing, from any task: streams the screen over USB serial. */
 void muse_ui_request_snapshot(void);
+/* The pet's toy UI, testing: open "stats", "train" or a "bubble" (CONFIG_MUSE_PET). */
+void muse_ui_pet_debug(const char *what);

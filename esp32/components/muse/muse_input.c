@@ -40,6 +40,9 @@
 #include "muse_menu.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#if CONFIG_MUSE_PET
+#include "pet.h"
+#endif
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
@@ -615,6 +618,28 @@ static bool console_command(char *line, bool whole)
         set_face(line + 5);
         return true;
     }
+#if CONFIG_MUSE_PET
+    if (!strncmp(line, "pet.stage=", 10)) {
+        /* Testing: >pet.stage=kid jumps the pet to a stage. */
+        for (int i = 0; i < PET_STAGE_COUNT; i++) {
+            if (!strcmp(line + 10, pet_stage_name((pet_stage_t)i))) {
+                printf("@pet %s\n", pet_debug_stage((pet_stage_t)i) ? "ok" : "no");
+                return true;
+            }
+        }
+        printf("@pet bad stage\n");
+        return true;
+    }
+    if (!strncmp(line, "pet.ui=", 7)) {
+        muse_ui_pet_debug(line + 7);
+        printf("@pet ui %s\n", line + 7);
+        return true;
+    }
+    if (!strncmp(line, "pet.species=", 12)) {
+        printf("@pet %s\n", pet_debug_species(atoi(line + 12)) ? "ok" : "no");
+        return true;
+    }
+#endif
     if (strncmp(line, "chat", 4) != 0) {
         return false;
     }

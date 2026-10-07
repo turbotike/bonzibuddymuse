@@ -132,8 +132,12 @@ void gadget_pet_add_commands(cJSON *commands)
     add_command(commands, "pet.feed", "Feed the creature a meal (or a snack). Not while it sleeps.", NULL, opt);
 
     opt = cJSON_CreateObject();
-    cJSON_AddItemToObject(opt, "score", param_spec("integer", "How well the game went, 0-10 (default 5)."));
-    add_command(commands, "pet.play", "Play with the creature: raises fun and bond, costs a little energy.", NULL, opt);
+    cJSON_AddItemToObject(opt, "hits", param_spec("integer", "Hits out of 5 (default 3)."));
+    add_command(commands, "pet.train", "Train the creature (Digimon style): raises fun, bond and POWER, which shapes its next evolution.", NULL, opt);
+    add_command(commands, "pet.play", "Same as pet.train with 3 hits: a bit of fun.", NULL, NULL);
+    opt = cJSON_CreateObject();
+    cJSON_AddItemToObject(opt, "theme", param_spec("integer", "0 NEON, 1 TOXIC, 2 LAVA, 3 ARCADE; omit to cycle."));
+    add_command(commands, "pet.theme", "Switch the screen's neon colour scheme.", NULL, opt);
 
     add_command(commands, "pet.clean", "Clean up after it (poop on the floor, dirt) and bathe it.", NULL, NULL);
     add_command(commands, "pet.medicine", "Give medicine when it is sick (two doses cure it).", NULL, NULL);
@@ -173,6 +177,10 @@ void gadget_pet_add_commands(cJSON *commands)
     add_command(commands, "pet.time_scale", "Speed its life up to watch it grow (for testing).", req, NULL);
 
     add_command(commands, "pet.pet", "Pet it (a stroke), as a tap on the screen does; warms an egg.", NULL, NULL);
+
+    req = cJSON_CreateObject();
+    cJSON_AddItemToObject(req, "stage", param_spec("string", "egg, baby, kid, teen, adult or elder."));
+    add_command(commands, "pet.debug_stage", "Testing only: jump the creature to a life stage (its age moves with it).", req, NULL);
 }
 
 static pet_mood_t parse_mood(const char *s)
@@ -204,10 +212,26 @@ cJSON *gadget_pet_command(const char *command, cJSON *params, const char *reques
         }
         return ok_with(status_payload());
     }
+    if (!strcmp(sub, "train")) {
+        int hits = 3;
+        int_param(params, "hits", &hits);
+        if (!pet_train(hits, 5)) {
+            return fail("not_now", "It can't train now (asleep or an egg).");
+        }
+        return ok_with(status_payload());
+    }
+    if (!strcmp(sub, "theme")) {
+        int theme;
+        if (!int_param(params, "theme", &theme)) {
+            theme = (pet_theme() + 1) % 4;
+        }
+        pet_set_theme(theme % 4);
+        return ok_with(status_payload());
+    }
     if (!strcmp(sub, "play")) {
         int score = 5;
         int_param(params, "score", &score);
-        if (!pet_play(score)) {
+        if (!pet_train(score / 2, 5)) {
             return fail("not_now", "It can't play now (asleep or an egg).");
         }
         return ok_with(status_payload());
@@ -294,6 +318,19 @@ cJSON *gadget_pet_command(const char *command, cJSON *params, const char *reques
     }
     if (!strcmp(sub, "pet")) {
         pet_tap();
+        return ok_with(status_payload());
+    }
+    if (!strcmp(sub, "debug_stage")) {
+        const char *st = str_param(params, "stage");
+        int stage = -1;
+        for (int i = 0; st && i < PET_STAGE_COUNT; i++) {
+            if (!strcmp(st, pet_stage_name((pet_stage_t)i))) {
+                stage = i;
+            }
+        }
+        if (stage < 0 || !pet_debug_stage((pet_stage_t)stage)) {
+            return fail("bad_param", "stage must be egg, baby, kid, teen, adult or elder");
+        }
         return ok_with(status_payload());
     }
     return fail("unknown_command", "No such pet command.");

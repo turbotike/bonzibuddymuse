@@ -1,85 +1,110 @@
 # The pet
 
-A creature lives on the 3.5" gadget. Its life runs on the board, once a
-second, and is saved to flash, so it goes on when the power is off (at half
-pace) and after a reboot. Muse is its spirit: the board reports to Muse when
-something happens and every so often, and Muse answers in the creature's
-voice (a speech bubble under it) and can look after it with the `pet.*`
-commands. The pet never needs Muse online to live.
+A dinosaur lives on the 3.5" gadget, Digimon style. Its life runs on the
+board, once a second, and is saved to flash, so it goes on when the power is
+off (at half pace) and after a reboot. Muse is its spirit: the board reports
+to Muse when something happens and every so often, and Muse answers in the
+creature's voice (a cartoon speech bubble above it) and can look after it
+with the `pet.*` commands. The pet never needs Muse online to live. Mat talks
+to Muse in the app; the gadget itself shows no text beyond the bubble.
 
-## The screen
+## The toy
 
-Top: the creature, drawn from its genome. Under its feet: its name, stage and
-age; its mood and health; five bars (FOOD, REST, FUN, CLEAN, LOVE; full is
-good); and the buttons:
+The screen is a 90s virtual pet: a plastic shell in the theme's colour round
+a neon-rimmed LCD, and three big round buttons under it.
+
+- **The LCD** shows the creature, an icon bar along the top (FOOD, TRAIN,
+  CLEAN, MEDS, LIGHT, STATS, THEME) and, under the creature, its name, stage,
+  age, mood, HP and POWER. Little icons blink there when it is hungry, dirty,
+  sick, lonely or bored.
+- **Buttons:** A moves the highlight along the icons, B does the highlighted
+  thing (or opens the stats page when nothing is highlighted), C cancels and
+  closes pages and bubbles. Icons can also just be tapped.
+- **Tap the creature** to pet it (+love; too many taps in a row and it has had
+  enough). Tap an egg to warm it.
+- **The bubble** appears at the top of the LCD for the creature's words (from
+  Muse, or its own short remarks) and goes after a few seconds.
+- **Themes:** NEON, TOXIC, LAVA and ARCADE, cycled with the THEME icon (or
+  `pet.theme`), kept with the pet.
+- Swiping left still reaches the Wi-Fi and pairing settings. Holding BOOT
+  still sends a voice note to Muse; the answer comes back in the bubble.
+
+## Care
 
 - **FEED** a meal (+40 food). It poops about 40 minutes after eating.
-- **PLAY** a ten-second game: tap the ball every time it jumps. Hits raise
-  fun and love and cost a little rest.
+- **TRAIN** Digimon-style: a marker runs up and down a meter; tap the LCD or
+  press B when it is in the zone and the dino fires at the boulder. Five
+  rounds, faster each time. Hits raise FUN, LOVE and **POWER**; the boulder
+  cracks with each hit. POWER fades slowly over days and decides, together
+  with care, how it evolves.
 - **CLEAN** bathes it and clears the floor. Poop on the floor lowers CLEAN
   and, left there, its health.
-- **MEDS** when it is sick (two doses cure it). Lit when needed.
-- **ZZZ / WAKE** lights out (it sleeps and regains rest) or back on. It
-  also falls asleep by itself when worn out, and sleeps 23:00 to 07:00.
-
-Tap the creature to pet it (+love; too many taps in a row and it has had
-enough). Hold the BOOT button to talk to it: Muse answers as the creature,
-in the bubble.
+- **MEDS** when it is sick (two doses cure it).
+- **LIGHT** lights out (it sleeps and regains REST) or back on. It also falls
+  asleep by itself when worn out, and sleeps 23:00 to 07:00.
+- **STATS** the six bars (FOOD, REST, FUN, CLEAN, LOVE, POWER), HP, care,
+  generation, stage and age.
 
 ## Its life
 
-- **Egg.** Tap it to warm it; twenty taps hatch it, or it hatches on its
-  own after six hours. The egg's colours are the creature's.
-- **Baby (first day), kid (to day 3), teen (to day 7), adult (to day 21),
-  elder.** Babies are hungriest. Kids get feet, teens their head feature
-  (ears, horns, antennae, crest or fin), adults their tail and markings.
-- **Evolution.** At each stage's end its body changes with how it was
-  cared for: well kept becomes *noble* (horns or a crest, brighter), middling
-  becomes *cute* (ears, big eyes, spots), neglected becomes *feral* (fangs,
-  spikes, stripes). Muse can choose with `pet.evolve`.
-- **Needs** drain by the hour at rates set by its stage and traits (bold,
-  lazy, sociable, greedy; one or two per creature). Below 40 for long and
-  health stops recovering; below 15 and health falls; under 40 health it is
-  **sick** (green, sweating) until it gets two doses of medicine.
-- **Leaving.** A full day at zero health and it runs away, leaving a new egg
-  of the next generation, coloured like its parent.
+- **Egg.** Twenty taps hatch it, or six hours. The shell is coloured like the
+  creature inside.
+- **Baby (first day):** an in-training blob with a face and a nub of tail.
+- **Kid (to day 3):** a chibi dino of its species. **Teen (to day 7):** its
+  crest and back features come in. **Adult (to day 21):** full size, tail tip
+  and markings. **Elder:** greying.
+- **Species:** rex, raptor, long-neck, stego, tri-horn, ankylo, ptero; each
+  with its own body plan, and a genome for size, head, neck, tail, eyes, jaw,
+  teeth, crest (nose horn, brow horns, feather crest, frill and horns, long
+  head crest), back (spikes, plates, sail, armour bumps), tail tip (club,
+  spikes, tuft), markings and colours. Every egg is a new one; a new egg from
+  a parent usually keeps the species and the family colour.
+- **Evolution.** At each stage's end its body changes: well cared for and
+  well trained becomes *noble* (a grander crest and back, brighter, bigger),
+  well cared for becomes *cute* (bigger eyes and head, a round snout, spots),
+  neglected becomes *feral* (fangs, spikes, a spiked tail, stripes). Muse can
+  choose with `pet.evolve`.
+- **Needs** drain by the hour at rates set by stage and traits (bold, lazy,
+  sociable, greedy). Under 40 health it is **sick** until medicined; a full
+  day at zero health and it runs away, leaving a new egg of the next
+  generation.
 
 ## Muse
 
-The board sends Muse a short report when it hatches, evolves, gets hungry,
-gets sick, wakes, or runs away, when a mood changes to a needy one (at most
-every 30 minutes), and routinely every `CONFIG_MUSE_PET_REPORT_MIN` minutes
-(90). The report describes the creature and its state and asks for one short
-line in the creature's voice; that reply shows in the bubble. Muse can also
-act:
+The board sends Muse a short report when it hatches, evolves, gets hungry or
+sick, wakes, or runs away, when a mood turns needy (at most every 30 minutes)
+and routinely every `CONFIG_MUSE_PET_REPORT_MIN` minutes (90). The report
+describes the creature and its state and asks for one short line in its
+voice; that line is the bubble. Muse can also act:
 
 | command | does |
 | --- | --- |
-| `pet.status` | everything about it, including a plain-words description |
+| `pet.status` | everything about it, with a plain-words description |
 | `pet.feed` (`snack`) | a meal, or a snack (fun, but unhealthy when full) |
-| `pet.play` (`score` 0-10) | a game it played with Muse |
-| `pet.clean`, `pet.medicine` | as the buttons |
+| `pet.train` (`hits` 0-5) | a training session Muse ran with it |
+| `pet.clean`, `pet.medicine` | as the icons |
 | `pet.lights` (`off`) | lights out or on |
 | `pet.name` (`name`) | names it (the hatch report asks Muse to) |
 | `pet.say` (`text`, `seconds`) | the bubble, with a chirp |
 | `pet.set_mood` (`mood`, `minutes`) | overrides how it feels and acts for a while |
 | `pet.evolve` (`variant`) | noble, cute or feral; now if the stage is nearly over |
+| `pet.theme` (`theme`) | the colour scheme, 0-3; omitted cycles |
 | `pet.new_egg` (`confirm`) | gives up on it and starts the next generation |
-| `pet.time_scale` (`scale`) | 1 = real time, up to 200 (an hour every 18 s), for watching it grow; not saved |
+| `pet.time_scale` (`scale`) | 1 = real time, up to 200, for watching it grow; not saved |
+| `pet.debug_stage` (`stage`) | testing: jump to a stage |
 | `pet.pet` | a stroke, as a tap |
 
-Typed turns from the USB console reach the same Muse: `tools/muse/chat.py
-"call pet.time_scale with scale 200"`.
+Over the USB console (`>` lines): `pet.stage=kid`, `pet.species=3`,
+`pet.ui=stats|train|bubble` for testing, and `chat=...` to type to Muse.
 
 ## Code
 
 - `esp32/components/muse/pet.c` the life: genome, needs, sleep, stages,
-  evolution, sickness, persistence (NVS namespace `pet`), chirps (synthesised
-  in its own pitch), reports and Muse's typed replies.
-- `esp32/components/muse/avatar/muse_pixel.c` the creature renderer: body,
-  features, face, animations (breathe, blink, hop, chomp, snore, sweat, cry,
-  talk with Muse's speech), overlays and the egg, from the genome. The Bonzi
-  sprite avatar is kept beside it as `muse_pixel.c.bonzi`.
+  evolution, sickness, POWER, persistence (NVS namespace `pet`), chirps in its
+  own pitch, reports and Muse's typed replies.
+- `esp32/components/muse/avatar/muse_pixel.c` the renderer: the blob, the
+  dino body plans, features, face, animations and the egg, from the genome.
+  Bonzi's sprite avatar is kept beside it as `muse_pixel.c.bonzi`.
 - `esp32/main/gadget_pet.c` the `pet.*` Home Link commands.
-- `esp32/components/muse/muse_ui.c` the panel, the game and the bubble
-  (`CONFIG_MUSE_PET`).
+- `esp32/components/muse/muse_ui.c` the toy: shell, icons, buttons, bubble,
+  stats page, training, themes (`CONFIG_MUSE_PET`).
