@@ -891,7 +891,7 @@ static void train_start(float now)
     lv_obj_set_size(s_train_zone, lv_obj_get_width(s_train_meter), (int)(mh * hw * 2));
     lv_obj_set_pos(s_train_zone, 0, (int)(mh * (0.5f - hw)));
     lv_obj_remove_flag(s_train, LV_OBJ_FLAG_HIDDEN);
-    train_msg("TRAINING! TAP OR B\nWHEN THE MARK\nIS IN THE ZONE", now, 2.5f);
+    train_msg("TRAIN! TAP OR B\nWHEN THE MARK\nIS IN THE ZONE", now, 2.5f);
     stats_hide();
     bubble_hide();
 }
