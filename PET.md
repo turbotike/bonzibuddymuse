@@ -48,7 +48,7 @@ a neon-rimmed LCD, and three big round buttons under it.
 
 ## Battles
 
-Wild dinos turn up at random while it is awake (a kid or older, not sick),
+Wild dinos turn up at random while it is awake (a rookie or older, not sick),
 roughly every few hours, and the BATTLE icon picks a fight any time. Battles
 are Pokemon-style turns. Your dino stands on the left, the enemy mirrored on
 the right, with HP bars and a message line.
@@ -74,9 +74,14 @@ the right, with HP bars and a message line.
 - **Egg.** Twenty taps hatch it, or six hours. The shell is coloured like the
   creature inside.
 - **Baby (first day):** an in-training blob with a face and a nub of tail.
-- **Kid (to day 3):** a chibi dino of its species. **Teen (to day 7):** its
-  crest and back features come in. **Adult (to day 21):** full size, tail tip
-  and markings. **Elder:** greying.
+- **Rookie (to day 3):** a chibi dino of its species. **Champion (to day 7):**
+  its crest and back features come in, a horn crown, bigger teeth, a
+  fighting stance. **Ultimate (to day 21):** full size, tail tip and
+  markings, and digital armour: a metal helmet the horns pierce, a chest
+  plate, a shoulder pad, a metal claw arm on two-legged species. **Mega:**
+  bigger again, with wings, a snout mask, spiked pads and glowing eyes. The
+  metal is gold on the noble path, dark steel on the feral path, silver
+  otherwise.
 - **Species:** rex, raptor, long-neck, stego, tri-horn, ankylo, ptero; each
   with its own body plan, and a genome for size, head, neck, tail, eyes, jaw,
   teeth, crest (nose horn, brow horns, feather crest, frill and horns, long
@@ -116,10 +121,10 @@ voice; that line is the bubble. Muse can also act:
 | `pet.battle` | a wild dino appears and the battle begins |
 | `pet.new_egg` (`confirm`) | gives up on it and starts the next generation |
 | `pet.time_scale` (`scale`) | 1 = real time, up to 200, for watching it grow; not saved |
-| `pet.debug_stage` (`stage`) | testing: jump to a stage |
+| `pet.debug_stage` (`stage`) | testing: egg, baby, rookie, champion, ultimate or mega |
 | `pet.pet` | a stroke, as a tap |
 
-Over the USB console (`>` lines): `pet.stage=kid`, `pet.species=3`,
+Over the USB console (`>` lines): `pet.stage=champion`, `pet.species=3`,
 `pet.ui=stats|train|bubble|battle` for testing, and `chat=...` to type to Muse.
 
 ## Code

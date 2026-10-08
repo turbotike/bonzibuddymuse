@@ -346,7 +346,7 @@ static void describe(char *out, size_t cap)
                  trait_words(g->traits, traits, sizeof(traits)));
         return;
     }
-    static const char *const SIZE[PET_STAGE_COUNT] = { "", "", "small chibi", "half-grown", "full-grown", "old" };
+    static const char *const SIZE[PET_STAGE_COUNT] = { "", "", "small rookie", "champion-class", "armoured ultimate", "fully armoured mega" };
     int n = snprintf(out, cap, "a %s %s %s %s dino with a cream belly, %s eyes and %s", SIZE[s.stage],
                      two_legged(g->species) ? (g->species == PET_SP_PTERO ? "winged" : "two-legged") : "four-legged",
                      hue_word(g->hue), pet_species_name(g->species), g->eye_n == 1 ? "one" : g->eye_n == 2 ? "two" : "three",
@@ -1890,7 +1890,7 @@ bool pet_debug_species(int species)
 
 const char *pet_stage_name(pet_stage_t st)
 {
-    static const char *const NAMES[PET_STAGE_COUNT] = { "egg", "baby", "kid", "teen", "adult", "elder" };
+    static const char *const NAMES[PET_STAGE_COUNT] = { "egg", "baby", "rookie", "champion", "ultimate", "mega" };
     return st < PET_STAGE_COUNT ? NAMES[st] : "?";
 }
 

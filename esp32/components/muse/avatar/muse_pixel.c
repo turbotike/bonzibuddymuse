@@ -39,7 +39,8 @@ static float s_art = ART_FULL;
 static bool s_flip;
 static int s_dx, s_dy;
 static uint8_t s_bank;   /* 0 the pet, PAL_BANK the enemy */
-#define PAL_BANK 32
+static bool s_eye_glow;  /* mega and feral eyes burn */
+#define PAL_BANK 40
 #define TAU 6.2831853f
 
 enum {
@@ -72,6 +73,10 @@ enum {
     C_SHADOW,
     C_BLUSH,
     C_FLAME,
+    C_METAL,
+    C_METAL_L,
+    C_METAL_D,
+    C_GLOW,
     C_COUNT
 };
 
@@ -124,9 +129,6 @@ static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
         h = (h * 2 + 85) / 3;   /* off colour: towards a queasy green */
         s = s * 2 / 3;
     }
-    if (v->stage == PET_ELDER) {
-        s = s / 2;   /* greying */
-    }
     s_pal[C_BG] = s_bg;
     s_pal[C_OUT] = hsv565(h, s * 3 / 4, 34);
     s_pal[C_DARK] = hsv565(h, s, 135);
@@ -156,6 +158,12 @@ static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
     s_pal[C_SHADOW] = rgb565(16, 12, 28);
     s_pal[C_BLUSH] = rgb565(240, 140, 170);
     s_pal[C_FLAME] = rgb565(255, 140, 40);
+    /* The armour's metal follows the evolution path: gold for noble, dark steel for feral, silver else. */
+    bool gold = g->back == 2 || g->back == 3, dark = g->teeth == 2 && g->back == 1;
+    s_pal[C_METAL] = gold ? rgb565(214, 170, 60) : dark ? rgb565(96, 98, 118) : rgb565(154, 163, 184);
+    s_pal[C_METAL_L] = gold ? rgb565(255, 228, 140) : dark ? rgb565(160, 162, 184) : rgb565(223, 230, 242);
+    s_pal[C_METAL_D] = gold ? rgb565(140, 100, 24) : dark ? rgb565(44, 44, 60) : rgb565(90, 98, 117);
+    s_pal[C_GLOW] = dark ? rgb565(255, 70, 70) : rgb565(120, 255, 255);
 }
 
 static void build_palette(const pet_view_t *v)
@@ -420,6 +428,7 @@ static void rim_shade(void)
             case C_BASE: light = C_LIGHT; dark = C_DARK; break;
             case C_SEC: light = C_SEC_L; dark = C_SEC_D; break;
             case C_BELLY: light = C_BELLY_L; dark = C_BELLY_D; break;
+            case C_METAL: light = C_METAL_L; dark = C_METAL_D; break;
             default: continue;
             }
             bool ul = edge_at(x - 1, y - 1) || edge_at(x - 2, y - 2) || edge_at(x - 3, y - 3) || edge_at(x, y - 2) || edge_at(x, y - 3) ||
@@ -566,7 +575,7 @@ static void draw_eye(float ex, float ey, float er, const face_t *f)
     ellipse(ex, ey, er + 1, er + 1, C_OUT, false);
     ellipse(ex, ey, er, er, C_EYE_W, false);
     float ir = er * 0.62f;
-    ellipse(ex + f->gx * er * 0.3f, ey + f->gy * er * 0.3f, ir, ir, C_IRIS, false);
+    ellipse(ex + f->gx * er * 0.3f, ey + f->gy * er * 0.3f, ir, ir, s_eye_glow ? C_GLOW : C_IRIS, false);
     float pr = er * 0.36f;
     pr = pr < 1 ? 1 : pr;
     ellipse(ex + f->gx * er * 0.4f, ey + f->gy * er * 0.4f, pr, pr, C_PUPIL, false);
@@ -586,7 +595,7 @@ static void draw_eye(float ex, float ey, float er, const face_t *f)
 
 /* ---- the dinosaur --------------------------------------------------------------------- */
 
-static const float STAGE_K[PET_STAGE_COUNT] = { 0, 0.55f, 0.62f, 0.8f, 1.0f, 0.95f };
+static const float STAGE_K[PET_STAGE_COUNT] = { 0, 0.55f, 0.62f, 0.8f, 1.0f, 1.08f };
 
 typedef struct {
     float hx, hy, hrx, hry;   /* the head, for the overlays */
@@ -627,6 +636,7 @@ static void face_state(face_t *f, const pet_view_t *v, const muse_pose_t *p)
 /* The in-training blob: a round head with a face, a nub of tail and little feet. */
 static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
 {
+    s_eye_glow = false;
     const pet_genome_t *g = &v->g;
     float t = f->t, at = f->at;
     pet_anim_t anim = v->anim;
@@ -842,6 +852,13 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         }
     }
 
+    /* Mega wings, behind the body (the ptero has its own). */
+    if (v->stage >= PET_ELDER && !ptero) {
+        float wl = 18.0f * k + 4 * A, wf = 0.5f + sinf(t * 2.5f) * 0.15f;
+        tri(bx - brx * 0.1f, by - bry * 0.6f, bx - brx * 0.1f - wl, by - bry * 0.6f - wl * wf, bx - brx * 0.7f, by - bry * 0.1f, C_SEC, true);
+        tri(bx - brx * 0.1f, by - bry * 0.6f, bx - brx * 0.1f - wl * 0.55f, by - bry * 0.6f - wl * (wf + 0.55f), bx - brx * 0.5f,
+            by - bry * 0.4f, C_SEC, true);
+    }
     /* The far legs, and the far wing. */
     float leg_r = (biped ? 2.4f : 2.0f) * k * body_k + 0.6f * A;
     float foot_y = FLOOR_Y - bounce;
@@ -912,7 +929,8 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     /* The snout and jaw. */
     float sx = hx + hrx * 0.75f, sy = hy + hry * 0.15f;
     float srx = hrx * (g->jaw == 1 ? 0.95f : 0.6f), sry = hry * 0.55f;
-    float open = f->talking ? (0.8f + f->level * 2.2f) * A : f->eating ? (sinf(at * 9.0f) > 0 ? 2.2f * A : 0) : (anim == PET_ANIM_HAPPY ? 0.8f * A : 0);
+    float open = f->talking ? (0.8f + f->level * 2.2f) * A : f->eating ? (sinf(at * 9.0f) > 0 ? 2.2f * A : 0)
+                 : (anim == PET_ANIM_HAPPY ? 0.8f * A : v->stage >= PET_TEEN ? 0.45f * A : 0);
     if (f->asleep) {
         open = 0;
     }
@@ -925,6 +943,24 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         ellipse(sx, sy, srx, sry, C_BASE, true);   /* the upper jaw */
         ellipse(sx - srx * 0.15f, sy + sry * 0.75f + open, srx * 0.85f, sry * 0.5f + 0.4f * A, C_BASE, true);   /* the lower jaw */
     }
+    /* Digital armour, by stage: ultimate gets a helmet, a chest plate and a shoulder pad; mega a
+     * snout mask and spikes on the pad as well. The crest's horns come through the helmet. */
+    bool champion = v->stage >= PET_TEEN, ultimate = v->stage >= PET_ADULT, mega = v->stage >= PET_ELDER;
+    if (ultimate) {
+        ellipse_rot(hx - hrx * 0.15f, hy - hry * 0.3f, hrx * 1.0f, hry * 0.62f, -0.2f, C_METAL, true);
+        spike(hx - hrx * 0.45f, hy - hry * 0.8f, -0.6f, -1, 5.0f * k + A, 3.0f * A, C_METAL, true);
+        ellipse_rot(bx + brx * 0.38f, by - bry * 0.05f, brx * 0.3f, bry * 0.5f, tilt, C_METAL, true);
+        ellipse_rot(fx - brx * 0.08f, fy - bry * 0.1f, brx * 0.3f, bry * 0.34f, tilt - 0.4f, C_METAL, true);
+        spike(fx - brx * 0.25f, fy - bry * 0.35f, -0.5f, -1, 4.0f * k + A, 2.6f * A, C_METAL, true);
+    }
+    if (mega) {
+        if (g->jaw != 2) {
+            ellipse(sx - srx * 0.1f, sy - sry * 0.6f, srx * 0.9f, sry * 0.45f, C_METAL, true);
+        }
+        spike(fx - brx * 0.05f, fy - bry * 0.4f, 0.2f, -1, 4.0f * k + A, 2.4f * A, C_METAL, true);
+        spike(fx - brx * 0.4f, fy - bry * 0.25f, -0.8f, -0.8f, 4.0f * k + A, 2.4f * A, C_METAL, true);
+    }
+    s_eye_glow = mega || (g->teeth == 2 && g->back == 1);
     /* Head crest. */
     float top = hy - hry;
     if (v->stage >= PET_TEEN) {
@@ -948,6 +984,10 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         default: break;
         }
     }
+    if (champion && g->crest != 2 && g->crest != 4) {   /* a champion's horn crown */
+        spike(hx + hrx * 0.05f, top + 2.0f * A, 0.3f, -1, 4.5f * k + A, 2.6f * A, C_SEC, true);
+        spike(hx - hrx * 0.35f, top + 2.5f * A, -0.1f, -1, 3.5f * k + A, 2.2f * A, C_SEC, true);
+    }
     /* The near legs, the arms, the near wing. */
     float near_hip = hip_x - 1.5f * A - walk * 2 * A, near_front = front_x - 1.5f * A + walk * 2 * A;
     capsule(hip_x - 1.5f * A, by + bry * 0.3f, near_hip, foot_y - foot_ry, leg_r, C_BASE, true);
@@ -962,7 +1002,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         float ax = bx + brx * 0.55f, ay = by - bry * 0.1f;
         arm_x = ax + 3.0f * k + 1.5f * A;
         arm_y = ay + 3.0f * k + A + raise;
-        capsule(ax, ay, arm_x, arm_y, 1.4f * k + 0.5f * A, C_BASE, true);
+        capsule(ax, ay, arm_x, arm_y, (1.4f * k + 0.5f * A) * (ultimate ? 1.7f : 1.0f), ultimate ? C_METAL : C_BASE, true);
     } else if (ptero) {
         float flap = f->asleep ? 0.2f : (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? sinf(t * 14.0f) : sinf(t * 5.0f) * 0.6f;
         float wl = 15.0f * k + 4 * A;
@@ -1020,8 +1060,12 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     if (!biped) {
         spike(near_front + 2.0f * A + foot_rx - 1, foot_y - foot_ry * 0.6f, 1, 0.35f, claw, 1.8f * A, C_WHITE, false);
     } else if (!ptero) {
-        spike(arm_x, arm_y, 0.8f, 0.6f, claw * 0.8f, 1.5f * A, C_WHITE, false);
-        spike(arm_x - 0.6f * A, arm_y + 0.8f * A, 0.3f, 1, claw * 0.7f, 1.4f * A, C_WHITE, false);
+        float ac = ultimate ? claw * 1.5f : claw * 0.8f;
+        spike(arm_x, arm_y, 0.8f, 0.6f, ac, 1.5f * A, C_WHITE, false);
+        spike(arm_x - 0.6f * A, arm_y + 0.8f * A, 0.3f, 1, ac * 0.85f, 1.4f * A, C_WHITE, false);
+        if (ultimate) {
+            spike(arm_x + 0.5f * A, arm_y - 0.6f * A, 1, 0.1f, ac * 0.9f, 1.4f * A, C_WHITE, false);
+        }
     }
     if (anim == PET_ANIM_EVOLVE && at < 2.2f) {
         if ((int)(at * 10) & 1) {
@@ -1045,7 +1089,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
             }
             if (g->teeth && !f->asleep && v->stage >= PET_KID) {
                 int n = g->teeth == 2 ? 4 : 3;
-                float tl = (g->teeth == 2 ? 3.2f : 2.2f) * A * (0.7f + 0.3f * k / ART);
+                float tl = (g->teeth == 2 ? 3.2f : 2.2f) * A * (0.7f + 0.3f * k / ART) * (champion ? 1.3f : 1.0f);
                 for (int i = 0; i < n; i++) {
                     float txp = sx + srx * 0.8f - i * (srx * 1.0f / n);
                     spike(txp, mly - 1, 0, 1, tl, 1.8f * A, C_WHITE, false);
