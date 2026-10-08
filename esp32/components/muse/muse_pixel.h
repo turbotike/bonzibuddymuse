@@ -48,6 +48,8 @@ void muse_pixel_render(const muse_pose_t *pose);
 
 /* Size (square, in screen pixels) muse_pixel_scale() blows the grid up to. */
 void muse_pixel_set_size(int px);
+/* A canvas that isn't square: w by h screen pixels. */
+void muse_pixel_set_canvas(int w, int h);
 
 /*
  * Write screen pixels [x0, x1] x [y0, y1] of the blown-up frame as RGB565,

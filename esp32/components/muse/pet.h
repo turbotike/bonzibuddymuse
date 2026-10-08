@@ -130,6 +130,7 @@ typedef struct {
     char battle_msg[48];
     char enemy_name[20];
     uint8_t hour;             /* local hour 0..23, 255 if the clock isn't set */
+    uint16_t minute_of_day;   /* 0..1439, 0xffff if the clock isn't set */
 } pet_view_t;
 
 /* Battles: fire beats leaf beats rock beats wind beats fire. */

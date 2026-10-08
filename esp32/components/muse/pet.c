@@ -1539,6 +1539,14 @@ void pet_view(pet_view_t *out)
     out->theme = s.theme;
     int hr = local_hour();
     out->hour = (uint8_t)(hr < 0 ? 255 : hr);
+    if (hr < 0) {
+        out->minute_of_day = 0xffff;
+    } else {
+        time_t tt = time(NULL);
+        struct tm tm;
+        localtime_r(&tt, &tm);
+        out->minute_of_day = (uint16_t)(tm.tm_hour * 60 + tm.tm_min);
+    }
     out->battle = s_bt.on;
     if (s_bt.on) {
         out->wild = s_bt.wild;
@@ -1794,8 +1802,7 @@ bool pet_evolve(int variant)
 void pet_new_egg(void)
 {
     lock();
-    pet_genome_t parent = s.g;
-    lay_egg(&parent, s.generation + 1);
+    lay_egg(NULL, s.generation + 1);   /* a stranger: a new species as often as not */
     save_now();
     unlock();
 }

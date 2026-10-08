@@ -283,7 +283,7 @@ static void muse_image_init(void)
     muse_pixel_set_size(s_canvas_px);
 
     for (int i = 0; i < STRIPS; i++) {
-        s_strips[i] = lv_draw_buf_create(s_canvas_px, STRIP_ROWS, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_strips[i] = lv_draw_buf_create(s_w > s_canvas_px ? s_w : s_canvas_px, STRIP_ROWS, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         assert(s_strips[i]);
     }
     lv_image_decoder_t *dec = lv_image_decoder_create();
@@ -666,8 +666,10 @@ static uint32_t icon_colour(char c)
 #define TOY_BUBBLE_S 12
 #define TRAIN_ROUNDS 5
 
-static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_rim, *s_toy_lcd, *s_toy_brand, *s_toy_ground, *s_toy_strip_bg;
-static uint16_t s_toy_sky = 0xffff, s_toy_dirt = 0xffff;
+static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_rim, *s_toy_lcd, *s_toy_brand;
+static uint16_t s_toy_sky = 0xffff;
+static lv_obj_t *s_stats_hint;
+static bool s_confirm_new;   /* X held on the stats page: a new egg? */
 static lv_obj_t *s_toy_socket[3], *s_toy_gloss[3];
 static lv_obj_t *s_toy_icons[ICON_COUNT], *s_toy_icon_imgs[ICON_COUNT];
 static lv_obj_t *s_toy_btn[3], *s_toy_btn_lbl[3];
@@ -821,6 +823,7 @@ static void apply_theme(void)
     lv_obj_set_style_bg_color(s_stats, lv_color_hex(t->lcd), 0);
     lv_obj_set_style_border_color(s_stats, lv_color_hex(t->neon2), 0);
     lv_obj_set_style_text_color(s_stats_text, lv_color_hex(t->text), 0);
+    lv_obj_set_style_text_color(s_stats_hint, lv_color_hex(t->dim), 0);
     static const uint32_t BAR_HUES[6] = { 0xffa64d, 0x6ea8ff, 0xffe066, 0x5ad1ff, 0xff7ad9, 0xff5c5c };
     for (int i = 0; i < 6; i++) {
         lv_obj_set_style_bg_color(s_stats_bars[i], lv_color_hex(t->lcd_line), LV_PART_MAIN);
@@ -844,7 +847,7 @@ static void apply_theme(void)
     if (s_bt) {
         battle_theme();
     }
-    s_toy_sky = s_toy_dirt = 0xffff;   /* the scene recolours the LCD on the next frame */
+    s_toy_sky = 0xffff;   /* the scene recolours the LCD on the next frame */
     invalidate_muse();
 }
 
@@ -896,6 +899,8 @@ static void stats_hide(void)
 {
     lv_obj_add_flag(s_stats, LV_OBJ_FLAG_HIDDEN);
     s_stats_until = 0;
+    s_confirm_new = false;
+    lv_label_set_text(s_stats_hint, "HOLD X FOR A NEW EGG");
 }
 
 /* ---- training: a button drill; each hit fires at the boulder ---- */
@@ -1106,11 +1111,34 @@ static void on_toy_icon(lv_event_t *e)
     toy_activate(i, now);
 }
 
+/* X held on the stats page: ask about a new egg. */
+static void on_toy_button_long(lv_event_t *e)
+{
+    int b = (int)(intptr_t)lv_event_get_user_data(e);
+    if (b == 2 && s_stats_until && !s_confirm_new) {
+        s_confirm_new = true;
+        s_stats_until = (float)esp_timer_get_time() / 1e6f + 20.0f;
+        lv_label_set_text(s_stats_hint, "NEW EGG? LOSES THIS DINO.\nENTER = YES   X = NO");
+        muse_voice_request_sound(MUSE_SOUND_BEEP, 1);
+    }
+}
+
 static void on_toy_button(lv_event_t *e)
 {
     int b = (int)(intptr_t)lv_event_get_user_data(e);
     float now = (float)esp_timer_get_time() / 1e6f;
     muse_state_poke();
+    if (s_confirm_new) {
+        if (b == 1) {
+            stats_hide();
+            pet_new_egg();
+            bubble_show("A new egg! Tap it to warm it.", 6);
+        } else if (b == 2) {
+            s_confirm_new = false;
+            lv_label_set_text(s_stats_hint, "HOLD X FOR A NEW EGG");
+        }
+        return;
+    }
     if (s_bt_shown) {
         battle_press(b);
         return;
@@ -1352,11 +1380,13 @@ static void build_toy(lv_obj_t *face)
     lv_obj_set_style_border_width(s_toy_lcd, 3, 0);
     lv_obj_move_to_index(s_toy_lcd, 3);
     lv_obj_set_style_clip_corner(s_toy_lcd, true, 0);
-    /* The ground continues under the canvas to the LCD's foot. */
-    s_toy_ground = plain(s_toy_lcd);
-    lv_obj_set_size(s_toy_ground, LCD_W - 6, LCD_H - 3 - 208);
-    lv_obj_set_pos(s_toy_ground, 0, 208 - 3);
-    lv_obj_set_style_bg_opa(s_toy_ground, LV_OPA_COVER, 0);
+    /* The canvas covers the LCD's inside, so the scene reaches its rim. */
+    s_muse_src.header.w = LCD_W - 6;
+    s_muse_src.header.h = LCD_H - 6;
+    s_muse_src.header.stride = (LCD_W - 6) * sizeof(uint16_t);
+    muse_pixel_set_canvas(LCD_W - 6, LCD_H - 6);
+    lv_image_set_src(s_canvas, &s_muse_src);
+    lv_obj_align(s_canvas, LV_ALIGN_TOP_LEFT, LCD_X + 3, LCD_Y + 3);   /* not the centre alignment it was built with */
     s_toy_brand = make_label(face, &lv_font_unscii_8, 0xffffff);
     lv_label_set_text(s_toy_brand, "DINO-PET 2000");
     lv_obj_set_style_text_letter_space(s_toy_brand, 2, 0);
@@ -1420,7 +1450,8 @@ static void build_toy(lv_obj_t *face)
         lv_obj_set_style_translate_y(btn, 3, LV_STATE_PRESSED);
         lv_obj_set_style_shadow_offset_y(btn, 2, LV_STATE_PRESSED);
         lv_obj_set_style_shadow_width(btn, 6, LV_STATE_PRESSED);
-        lv_obj_add_event_cb(btn, on_toy_button, LV_EVENT_CLICKED, (void *)(intptr_t)b);
+        lv_obj_add_event_cb(btn, on_toy_button, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)b);
+        lv_obj_add_event_cb(btn, on_toy_button_long, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)b);
         lv_obj_t *gloss = plain(btn);
         lv_obj_set_size(gloss, 34, 14);
         lv_obj_align(gloss, LV_ALIGN_TOP_MID, 0, 6);
@@ -1483,6 +1514,10 @@ static void build_toy(lv_obj_t *face)
         lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
         s_stats_bars[i] = bar;
     }
+    s_stats_hint = make_label(s_stats, &lv_font_unscii_8, 0xffffff);
+    lv_obj_set_style_text_align(s_stats_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_stats_hint, "HOLD X FOR A NEW EGG");
+    lv_obj_align(s_stats_hint, LV_ALIGN_BOTTOM_MID, 0, 0);
     s_stats_text = make_label(s_stats, &lv_font_unscii_8, 0xffffff);
     lv_obj_set_style_text_align(s_stats_text, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_line_space(s_stats_text, 4, 0);
@@ -1572,12 +1607,10 @@ static void update_toy(float now, const char *caption, bool fresh)
     if (s_reply_box) {
         lv_obj_add_flag(s_reply_box, LV_OBJ_FLAG_HIDDEN);
     }
-    uint16_t sky = muse_pixel_scene_sky(), dirt = muse_pixel_scene_ground();
-    if (sky != s_toy_sky || dirt != s_toy_dirt) {
+    uint16_t sky = muse_pixel_scene_sky();
+    if (sky != s_toy_sky) {
         s_toy_sky = sky;
-        s_toy_dirt = dirt;
         lv_obj_set_style_bg_color(s_toy_lcd, lv_color_make((sky >> 11) << 3, ((sky >> 5) & 0x3f) << 2, (sky & 0x1f) << 3), 0);
-        lv_obj_set_style_bg_color(s_toy_ground, lv_color_make((dirt >> 11) << 3, ((dirt >> 5) & 0x3f) << 2, (dirt & 0x1f) << 3), 0);
     }
     train_tick(now);
     if (s_stats_until && now > s_stats_until) {
@@ -2194,9 +2227,6 @@ static void build_screen(void)
                 /* The creature lives at the top; its panel takes the room under its feet, above
                  * the caption line and the mic icon. */
                 build_toy(face);
-                s_big_y = s_answers[0].y;
-                lv_obj_align(s_canvas, LV_ALIGN_CENTER, 0, s_big_y);
-                s_muse_y = s_big_y;
 #endif
                 ESP_LOGI(TAG, "transcript: %d x %d px under a %d px Muse", s_answers[0].w, s_answers[0].h, s_canvas_px);
                 return;

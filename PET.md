@@ -13,10 +13,12 @@ to Muse in the app; the gadget itself shows no text beyond the bubble.
 The screen is a 90s virtual pet: a plastic shell in the theme's colour round
 a neon-rimmed LCD, and three big round buttons under it.
 
-- **The scene.** He lives in front of a mountain range with a smoking volcano,
-  rolling hills and a dirt-and-grass ground. The sky follows the clock: blue
-  by day, peach at dawn and dusk, deep night with stars and a moon from
-  20:00 to 06:00. The LCD takes the sky colour so the scene fills it.
+- **The scene** fills the LCD: a mountain range with a smoking volcano,
+  rolling hills and a grass field he paces about on, turning to face the
+  way he goes and hopping now and then. The sky follows the clock: blue by
+  day, peach at dawn and dusk, deep night with stars and a moon from 20:00
+  to 06:00. Weather changes every twenty minutes or so: clear, overcast, or
+  rain with a grey sky, low clouds, streaks and puddles.
 - **The LCD** shows the creature, an icon bar along the top (FOOD, TRAIN,
   BATTLE, CLEAN, MEDS, LIGHT, STATS, THEME) and, along the foot on the ground,
   its name, stage, age, mood, HP and POWER. Little icons blink there when it
@@ -123,7 +125,7 @@ voice; that line is the bubble. Muse can also act:
 | `pet.evolve` (`variant`) | noble, cute or feral; now if the stage is nearly over |
 | `pet.theme` (`theme`) | the colour scheme, 0-3; omitted cycles |
 | `pet.battle` | a wild dino appears and the battle begins |
-| `pet.new_egg` (`confirm`) | gives up on it and starts the next generation |
+| `pet.new_egg` (`confirm`) | gives up on it and starts the next generation: a fresh roll, any species. On the gadget: open STATS, hold X, then enter to confirm |
 | `pet.time_scale` (`scale`) | 1 = real time, up to 200, for watching it grow; not saved |
 | `pet.debug_stage` (`stage`) | testing: egg, baby, rookie, champion, ultimate or mega |
 | `pet.pet` | a stroke, as a tap |

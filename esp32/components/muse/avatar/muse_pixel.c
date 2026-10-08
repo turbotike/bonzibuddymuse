@@ -28,11 +28,11 @@
 
 #include "pet.h"
 
-#define W 128
-#define H 128
-#define FLOOR_Y 118
+#define W 147   /* the LCD's inside at two screen pixels per art pixel */
+#define H 177
+#define FLOOR_Y 121
 #define ART_FULL 2.3f   /* the geometry was laid out on a 64 px grid; this blows it up */
-#define ART_BATTLE 1.2f  /* two on the screen */
+#define ART_BATTLE 1.3f  /* two on the screen */
 static float s_art = ART_FULL;
 #define ART s_art
 /* Where a figure lands: mirrored, shifted, lowered; and which palette bank it uses. */
@@ -40,6 +40,7 @@ static bool s_flip;
 static int s_dx, s_dy;
 static uint8_t s_bank;   /* 0 the pet, PAL_BANK the enemy */
 static bool s_eye_glow;  /* mega and feral eyes burn */
+static float s_roam_walk, s_roam_hop;   /* pacing: the legs' step and a hop, from the frame */
 #define PAL_BANK 48
 #define TAU 6.2831853f
 
@@ -101,6 +102,7 @@ static pet_view_t s_v;
 static uint16_t s_bg;   /* the sky, which the LCD matches */
 static uint16_t s_ground;
 static int s_hour = 255;
+static float s_clock_s = -1;   /* seconds into the day, or -1: the weather runs on it */
 
 /* ---- colours ------------------------------------------------------------- */
 
@@ -476,7 +478,7 @@ static void rim_shade(void)
 
 /* ---- the scene ------------------------------------------------------------------------ */
 
-#define GROUND_Y 100   /* the horizon row: ground from here down */
+#define GROUND_Y 103   /* the horizon row: ground from here down */
 
 /* Blends two RGB565 colours. */
 static uint16_t blend565(uint16_t a, uint16_t b, float f)
@@ -492,6 +494,9 @@ static uint16_t blend565(uint16_t a, uint16_t b, float f)
  * Rain ramps in over the first minute and out over the last. Returns the rain, 0..1. */
 static float weather_rain(float t, bool *cloudy)
 {
+    if (s_clock_s >= 0) {
+        t = s_clock_s;   /* the day's clock, so a reboot doesn't restart the weather */
+    }
     int slot = (int)(t / WEATHER_SLOT_S);
     uint32_t r = hash(0x7eafu, (uint32_t)slot) % 100;
     *cloudy = r < 50;
@@ -520,7 +525,7 @@ static uint16_t scene_sky_colour(int hour)
 /* The mountains' height at column x: a few peaks with straight slopes, the volcano flat-topped. */
 static float mountain_h(int x)
 {
-    static const float PX[5] = { 8, 34, 62, 92, 118 };
+    static const float PX[5] = { W * 0.06f, W * 0.27f, W * 0.48f, W * 0.72f, W * 0.92f };
     static const float PH[5] = { 14, 24, 18, 30, 12 };
     static const float PS[5] = { 0.9f, 0.75f, 0.8f, 0.7f, 1.0f };
     float h = 0;
@@ -575,16 +580,17 @@ static void draw_scene(float t, int hour)
         for (int y = GROUND_Y - mh; y < GROUND_Y; y++) {
             px(x, y, (x & 3) == 0 && y < GROUND_Y - mh + 3 ? C_MTN_D : C_MTN);
         }
-        /* Snow on the tallest. */
-        if (mh > 20 && x >= 82 && x <= 102 && mountain_h(x) > 22) {
+        /* Snow on the second peak. */
+        if (mh > 17 && fabsf(x - W * 0.27f) < 7) {
             px(x, GROUND_Y - mh, C_CLOUD);
         }
     }
-    px2(90, GROUND_Y - 26, C_FLAME);
-    px2(92, GROUND_Y - 27, C_SUN);
+    const float vx = W * 0.72f;   /* the volcano */
+    px2(iround(vx - 2), GROUND_Y - 26, C_FLAME);
+    px2(iround(vx), GROUND_Y - 27, C_SUN);
     for (int i = 0; i < 4; i++) {
         float ph = fmodf(t * 4.0f + i * 5.0f, 20.0f);
-        ellipse(91 + sinf(t + i) * 2 + ph * 0.3f, GROUND_Y - 29 - ph, 2.5f + ph * 0.15f, 2.0f + ph * 0.1f, C_MTN_D, false);
+        ellipse(vx - 1 + sinf(t + i) * 2 + ph * 0.3f, GROUND_Y - 29 - ph, 2.5f + ph * 0.15f, 2.0f + ph * 0.1f, C_MTN_D, false);
     }
     /* Hills in front, grassy. */
     for (int x = 0; x < W; x++) {
@@ -785,7 +791,7 @@ static void draw_eye(float ex, float ey, float er, const face_t *f)
 
 /* ---- the dinosaur --------------------------------------------------------------------- */
 
-static const float STAGE_K[PET_STAGE_COUNT] = { 0, 0.55f, 0.62f, 0.8f, 1.0f, 1.08f };
+static const float STAGE_K[PET_STAGE_COUNT] = { 0, 0.55f, 0.62f, 0.76f, 0.88f, 0.96f };
 
 typedef struct {
     float hx, hy, hrx, hry;   /* the head, for the overlays */
@@ -846,6 +852,7 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
         float ch = sinf(at * 9.0f);
         ry *= 1.0f + 0.05f * ch;
     }
+    bounce += s_roam_hop * ART;
     float cx = W / 2.0f + (anim == PET_ANIM_PLAY ? sinf(at * 3.5f) * 6.0f * ART : 0);
     float cy = FLOOR_Y - ry - bounce;
     ellipse(cx, FLOOR_Y + 1.5f * ART, rx * 0.9f, 1.6f * ART, C_SHADOW, false);
@@ -970,7 +977,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     const float A = ART;
     bool biped = g->species == PET_SP_REX || g->species == PET_SP_RAPTOR || g->species == PET_SP_PTERO;
     bool ptero = g->species == PET_SP_PTERO;
-    float k = STAGE_K[v->stage] * (0.85f + g->size / 255.0f * 0.3f) * ART * 1.1f;
+    float k = STAGE_K[v->stage] * (0.85f + g->size / 255.0f * 0.3f) * ART;
     /* Chibi proportions early: a big head on a small body. */
     float head_k = v->stage == PET_KID ? 1.45f : v->stage == PET_TEEN ? 1.15f : 1.0f;
     head_k *= 0.8f + g->head_size / 255.0f * 0.4f;
@@ -980,7 +987,8 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     if (ptero && !f->asleep) {
         bounce += 2.0f * A + sinf(t * 3.0f) * 1.5f * A;   /* hovering a little */
     }
-    float walk = anim == PET_ANIM_PLAY ? sinf(at * 7.0f) : 0;
+    float walk = anim == PET_ANIM_PLAY ? sinf(at * 7.0f) : s_roam_walk;
+    bounce += s_roam_hop * k;
 
     /* The body. */
     float brx, bry, tilt;
@@ -1392,7 +1400,6 @@ static void draw_overlays(const pet_view_t *v, const face_t *f, const figure_t *
     if (f->listening) {
         draw_question(iround(fig->hx + fig->hrx * 0.6f + 2 * A), iround(fig->top - 9 * A), C_STAR);
     }
-    draw_poops(v->poops, t);
 }
 
 /* Rain streaks over the whole scene. */
@@ -1454,7 +1461,7 @@ static void draw_fighter(const pet_view_t *v, const muse_pose_t *p, bool enemy)
     s_art = ART_BATTLE;
     s_flip = enemy;
     s_bank = enemy ? PAL_BANK : 0;
-    int shift = 38;
+    int shift = 44;
     s_dx = enemy ? shift : -shift;
     if (lunging) {
         int l = (int)(lunge(bt) * 22);
@@ -1490,6 +1497,7 @@ static void draw_fighter(const pet_view_t *v, const muse_pose_t *p, bool enemy)
 
 static void render_battle(const muse_pose_t *p)
 {
+    s_roam_walk = s_roam_hop = 0;
     draw_fighter(&s_v, p, true);
     draw_fighter(&s_v, p, false);
 }
@@ -1500,6 +1508,11 @@ void muse_pixel_render(const muse_pose_t *p)
 {
     pet_view(&s_v);
     s_hour = s_v.hour;
+    if (s_v.minute_of_day != 0xffff) {
+        s_clock_s = s_v.minute_of_day * 60.0f + fmodf(p->t, 60.0f);
+    } else {
+        s_clock_s = -1;
+    }
     bool cloudy;
     float rain = weather_rain(p->t, &cloudy);
     s_bg = scene_sky_colour(s_hour);
@@ -1535,6 +1548,20 @@ void muse_pixel_render(const muse_pose_t *p)
     face_t f;
     face_state(&f, &s_v, p);
     figure_t fig;
+    /* Up and about, it paces, turns to face the way it goes, and hops now and then. */
+    bool roaming = (s_v.anim == PET_ANIM_IDLE || s_v.anim == PET_ANIM_SAD) && !f.asleep && !f.eating && !f.talking && !f.listening &&
+                   !f.thinking;
+    float wx = 0, wv = 0;
+    if (roaming) {
+        float ph = p->t * 0.22f;
+        wx = sinf(ph) * (s_v.stage == PET_BABY ? 18.0f : 24.0f);
+        wv = cosf(ph);
+    }
+    s_roam_walk = fabsf(wv) > 0.3f ? sinf(p->t * 7.0f) : 0;
+    float hp = fmodf(p->t, 11.0f);
+    s_roam_hop = roaming && hp < 0.7f && s_v.mood != PET_MOOD_TIRED ? fabsf(sinf(hp / 0.7f * 3.14159f)) * 5.0f : 0;
+    s_flip = roaming && wv < -0.05f;
+    s_dx = (int)wx;
     if (s_v.stage == PET_BABY) {
         draw_blob(&s_v, &f, &fig);
     } else {
@@ -1542,33 +1569,45 @@ void muse_pixel_render(const muse_pose_t *p)
         draw_dino(&s_v, &f, &fig);
     }
     draw_overlays(&s_v, &f, &fig);
+    s_flip = false;
+    s_dx = 0;
+    draw_poops(s_v.poops, p->t);
     draw_rain(p->t);
 }
 
 #define MAP_MAX 512
-static uint8_t s_map[MAP_MAX];
-static int s_size = 256;
+static uint8_t s_map_x[MAP_MAX], s_map_y[MAP_MAX];
+static int s_size_w = 256, s_size_h = 256;
+
+void muse_pixel_set_canvas(int w, int h)
+{
+    s_size_w = w < MAP_MAX ? w : MAP_MAX;
+    s_size_h = h < MAP_MAX ? h : MAP_MAX;
+    for (int i = 0; i < s_size_w; i++) {
+        s_map_x[i] = (uint8_t)(i * W / s_size_w);
+    }
+    for (int i = 0; i < s_size_h; i++) {
+        s_map_y[i] = (uint8_t)(i * H / s_size_h);
+    }
+}
 
 void muse_pixel_set_size(int px_size)
 {
-    s_size = px_size < MAP_MAX ? px_size : MAP_MAX;
-    for (int i = 0; i < s_size; i++) {
-        s_map[i] = (uint8_t)(i * W / s_size);
-    }
+    muse_pixel_set_canvas(px_size, px_size);
 }
 
 void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1)
 {
     for (int y = y0; y <= y1; y++, dst += stride_px) {
-        if ((unsigned)y >= (unsigned)s_size) {
+        if ((unsigned)y >= (unsigned)s_size_h) {
             for (int i = 0; i <= x1 - x0; i++) {
                 dst[i] = s_bg;
             }
             continue;
         }
-        const uint8_t *row = &s_fb[s_map[y] * W];
+        const uint8_t *row = &s_fb[s_map_y[y] * W];
         for (int x = x0, i = 0; x <= x1; x++, i++) {
-            dst[i] = (unsigned)x < (unsigned)s_size ? s_pal[row[s_map[x]]] : s_bg;
+            dst[i] = (unsigned)x < (unsigned)s_size_w ? s_pal[row[s_map_x[x]]] : s_bg;
         }
     }
 }
