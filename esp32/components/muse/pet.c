@@ -603,6 +603,26 @@ static void lay_egg(const pet_genome_t *parent, uint16_t generation)
     ESP_LOGI(TAG, "a new egg: generation %u, seed %08x", (unsigned)generation, (unsigned)g.seed);
 }
 
+/* A name from a list, or made of syllables, from the genome: no two dinos alike for long. */
+static void canned_name(char *out, size_t cap)
+{
+    static const char *const NAMES[] = {
+        "Nibbles", "Chomp", "Rex", "Spike", "Zilla", "Bronto", "Tiny", "Fang", "Pebble", "Rocky", "Dash", "Nugget",
+        "Munch", "Gizmo", "Sprout", "Blaze", "Frost", "Rumble", "Scooter", "Pickles", "Waffles", "Taco", "Biscuit",
+        "Zed", "Kiwi", "Mango", "Ziggy", "Bolt", "Echo", "Grub", "Snap", "Thorn", "Comet", "Pixel", "Turbo", "Nacho",
+        "Stompy", "Ember", "Jinx", "Boomer", "Crunch", "Dozer", "Fizz", "Gronk", "Hopper", "Kaboom", "Lumpy", "Mochi",
+    };
+    static const char *const ON[] = { "Z", "K", "Gr", "Sn", "Bl", "T", "R", "V", "Dr", "Fl", "M", "P", "Kr", "Th", "Sp", "N" };
+    static const char *const NU[] = { "a", "o", "i", "u", "e", "or", "ax", "ib", "oo", "ee", "ar", "ug" };
+    static const char *const CO[] = { "k", "x", "g", "p", "zz", "n", "sh", "t", "", "", "bles", "by" };
+    uint32_t x = s.g.seed * 2654435761u + 17u + s.generation * 7919u;
+    if (rnd(&x, 0, 9) < 7) {
+        strlcpy(out, NAMES[rnd(&x, 0, (int)(sizeof(NAMES) / sizeof(NAMES[0])) - 1)], cap);
+        return;
+    }
+    snprintf(out, cap, "%s%s%s%s", ON[rnd(&x, 0, 15)], NU[rnd(&x, 0, 11)], rnd(&x, 0, 2) ? NU[rnd(&x, 0, 11)] : "", CO[rnd(&x, 0, 11)]);
+}
+
 static void hatch(void)
 {
     s.stage = PET_BABY;
@@ -614,9 +634,10 @@ static void hatch(void)
         s.needs[i] = 70;
     }
     s.needs[PET_NEED_FOOD] = 45;   /* hungry from the start */
+    canned_name(s.name, sizeof(s.name));
     s_dirty = true;
     set_anim(PET_ANIM_HATCH, 4.0f);
-    ESP_LOGI(TAG, "hatched");
+    ESP_LOGI(TAG, "hatched: %s", s.name);
 }
 
 /* The evolution at a stage's end: its body changes with how it was looked after
@@ -860,7 +881,7 @@ bool pet_report(const char *reason)
              "[pet report] %s. You are the spirit of %s, %s, %s, living on Mat's desk gadget. Status: %s. "
              "Answer with ONE short line (under 110 characters) that the creature says out loud right now, in its own "
              "small voice and personality (it is a pet, not an assistant; no stage directions). You may also call pet.* "
-             "commands: pet.say, pet.set_mood, pet.name (if it has no name, name it), pet.feed/play/clean/medicine/lights, "
+             "commands: pet.say, pet.set_mood, pet.name (only if Mat asks for a new name), pet.feed/play/clean/medicine/lights, "
              "pet.evolve. Don't mention this message.",
              reason, name, pet_stage_name(stage), desc, status);
     s_last_report_us = now;
