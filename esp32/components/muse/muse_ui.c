@@ -603,14 +603,15 @@ static void update_transcript(const char *caption, bool fresh, bool opened, floa
 
 typedef struct {
     uint32_t frame, frame_dark, lcd, lcd_line, neon, neon2, text, dim;
+    uint32_t btn[3];   /* the three buttons' plastics */
     const char *name;
 } theme_t;
 
 static const theme_t THEMES[] = {
-    { 0x3d2a73, 0x1c1238, 0x07061a, 0x2a1f52, 0xff2bd6, 0x2bf5ff, 0xf4ecff, 0x6b5c93, "NEON" },
-    { 0x1f5a42, 0x0b2a1e, 0x03100c, 0x114d3a, 0x39ff14, 0xffb000, 0xeafff0, 0x4d8a68, "TOXIC" },
-    { 0x6a3a1a, 0x2a160a, 0x120803, 0x5a2d10, 0xff7a00, 0x00c8ff, 0xfff1e6, 0x9a6a4a, "LAVA" },
-    { 0x4a1f58, 0x1e0c26, 0x0c0410, 0x45124d, 0xffe600, 0xff3d7f, 0xfff8e0, 0x8a5d93, "ARCADE" },
+    { 0x3d2a73, 0x1c1238, 0x07061a, 0x2a1f52, 0xff2bd6, 0x2bf5ff, 0xf4ecff, 0x6b5c93, { 0xff2bd6, 0x2bf5ff, 0xffe14a }, "NEON" },
+    { 0x1f5a42, 0x0b2a1e, 0x03100c, 0x114d3a, 0x39ff14, 0xffb000, 0xeafff0, 0x4d8a68, { 0x39ff14, 0xffb000, 0xf0f0f0 }, "TOXIC" },
+    { 0x6a3a1a, 0x2a160a, 0x120803, 0x5a2d10, 0xff7a00, 0x00c8ff, 0xfff1e6, 0x9a6a4a, { 0xff7a00, 0xff3030, 0x00c8ff }, "LAVA" },
+    { 0x4a1f58, 0x1e0c26, 0x0c0410, 0x45124d, 0xffe600, 0xff3d7f, 0xfff8e0, 0x8a5d93, { 0xffe600, 0xff3d7f, 0x3dd6ff }, "ARCADE" },
 };
 #define THEME_COUNT 4
 
@@ -791,7 +792,7 @@ static void apply_theme(void)
     lv_obj_set_style_border_color(s_toy_rim, lv_color_hex(t->lcd_line), 0);
     lv_obj_set_style_text_color(s_toy_brand, lv_color_hex(t->dim), 0);
     for (int b = 0; b < 3; b++) {
-        lv_color_t plastic = lv_color_hex(t->neon2);
+        lv_color_t plastic = lv_color_hex(t->btn[b]);
         lv_obj_set_style_bg_color(s_toy_socket[b], lv_color_darken(lv_color_hex(t->frame_dark), 80), 0);
         lv_obj_set_style_border_color(s_toy_socket[b], lv_color_darken(lv_color_hex(t->frame_dark), 140), 0);
         lv_obj_set_style_bg_color(s_toy_btn[b], lv_color_lighten(plastic, 40), 0);

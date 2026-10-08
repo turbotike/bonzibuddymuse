@@ -635,6 +635,11 @@ static bool console_command(char *line, bool whole)
         printf("@pet ui %s\n", line + 7);
         return true;
     }
+    if (!strncmp(line, "pet.theme=", 10)) {
+        pet_set_theme(atoi(line + 10));
+        printf("@pet theme %d\n", pet_theme());
+        return true;
+    }
     if (!strncmp(line, "pet.species=", 12)) {
         printf("@pet %s\n", pet_debug_species(atoi(line + 12)) ? "ok" : "no");
         return true;
