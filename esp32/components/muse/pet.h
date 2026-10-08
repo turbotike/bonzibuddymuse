@@ -117,7 +117,35 @@ typedef struct {
     uint8_t care;             /* 0..100, how well it has been looked after this stage */
     uint8_t power;            /* 0..100, built by training; shapes the evolution */
     uint8_t theme;            /* the screen's colour scheme, kept with the pet */
+    /* A battle, while one is on. */
+    bool battle;
+    bool wild;                /* a wild one turned up (else a challenge) */
+    uint8_t battle_phase;     /* pet_battle_phase_t */
+    uint8_t battle_anim;      /* pet_battle_anim_t */
+    float battle_anim_t;
+    pet_genome_t enemy;
+    uint8_t enemy_stage;
+    uint8_t elem, enemy_elem; /* pet_element_t */
+    int16_t hp, hp_max, enemy_hp, enemy_hp_max;
+    char battle_msg[48];
+    char enemy_name[20];
 } pet_view_t;
+
+/* Battles: fire beats leaf beats rock beats wind beats fire. */
+typedef enum { PET_EL_FIRE, PET_EL_WIND, PET_EL_LEAF, PET_EL_ROCK, PET_EL_COUNT } pet_element_t;
+typedef enum { PET_BT_NONE, PET_BT_INTRO, PET_BT_MENU, PET_BT_ACTING, PET_BT_WON, PET_BT_LOST, PET_BT_RAN, PET_BT_FLED } pet_battle_phase_t;
+typedef enum { PET_BA_NONE, PET_BA_PET_LUNGE, PET_BA_ENEMY_LUNGE, PET_BA_PET_HURT, PET_BA_ENEMY_HURT, PET_BA_PET_FAINT, PET_BA_ENEMY_FAINT } pet_battle_anim_t;
+enum { PET_MOVE_BITE, PET_MOVE_SPECIAL, PET_MOVE_GUARD, PET_MOVE_RUN };
+
+/* A wild dino appears (or the pet picks a fight); false if it can't now (egg, baby, asleep, busy). */
+bool pet_battle_start(bool wild);
+/* At the menu: PET_MOVE_*; false if it isn't the pet's turn to choose. */
+bool pet_battle_choose(int move);
+/* Closes a finished battle (or sends an ignored wild one away). */
+void pet_battle_dismiss(void);
+pet_element_t pet_species_element(pet_species_t sp);
+const char *pet_element_name(pet_element_t e);
+const char *pet_special_name(pet_element_t e);
 
 void pet_init(void);
 void pet_view(pet_view_t *out);

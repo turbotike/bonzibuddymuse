@@ -615,12 +615,14 @@ static const theme_t THEMES[] = {
 };
 #define THEME_COUNT 4
 
-enum { ICON_FOOD, ICON_TRAIN, ICON_CLEAN, ICON_MEDS, ICON_LIGHT, ICON_STATS, ICON_THEME, ICON_COUNT, ICON_HEART = ICON_COUNT, ICON_MOON, ICON_ALL };
+enum { ICON_FOOD, ICON_TRAIN, ICON_BATTLE, ICON_CLEAN, ICON_MEDS, ICON_LIGHT, ICON_STATS, ICON_THEME, ICON_COUNT, ICON_HEART = ICON_COUNT, ICON_MOON, ICON_ALL };
 
 /* 16x16 pixel icons in colour: a letter a colour, '.' clear. */
 static const char *const ICON_ART[ICON_ALL][16] = {
     { "......kk........", ".....kgGk.......", "....kgGGk.......", "...kkkkkkk......", "..krrrrrrrk.....", ".krwrrrrrrrk....", "krrwrrrrrrrrk...", "krrrrrrrrrRrk...", "krrrrrrrrrRRk...", "krrrrrrrrRRRk...", "krrrrrrrRRRRk...", ".krrrrrRRRRk....", ".kRrrrRRRRRk....", "..kRRRk.kRRk....", "...kkk...kk.....", "................" },   /* food */
     { "................", "................", "..kk........kk..", ".kcck......kcck.", ".kccCk....kCcck.", "kkccCkkkkkkCcckk", "kcccCkccccckCcck", "kcCCCkCCCCCkCCCk", "kcCCCkCCCCCkCCCk", "kkCCCkkkkkkkCCkk", ".kCCCk....kCCCk.", ".kkCCk....kCCkk.", "..kkkk....kkkk..", "................", "................", "................" },   /* train */
+    { "k.............k", "kck.........kck.", "kcck.......kcck.", ".kcck.....kcck..", "..kcck...kcck...", "...kcck.kcck....", "....kccckcck....", ".....kccccck....",
+      ".....kccccck....", "....kcckkcck....", "...kcck.kkcck...", "..kcnk...knck...", "..knnk...knnk...", "..kkk.....kkk...", "................", "................" },   /* battle */
     { ".....w..........", "....w.w....ww...", ".....w....w..w..", "...........ww...", "..kkkkkkkkkk....", ".kppppppppppk...", "kpwwppppppppPk..", "kpwpppppppppPk..", "kppppppppppPPk..", "kppppppppppPPk..", "kpppppppppPPPk..", ".kPPPPPPPPPPk...", "..kkkkkkkkkk....", "......w.........", ".....w.w........", "......w........." },   /* clean */
     { "................", "................", "................", "....kkkkkkkk....", "...krrrrkwwwk...", "..krrrrrkwwwwk..", ".krrwrrrkwwwwwk.", ".krrwrrrkwwwwwk.", ".krrrrrrkwwwwwk.", ".krrrrrrkwwwwwk.", "..kRrrrrkwwwlk..", "...kRRRRkwllk...", "....kkkkkkkk....", "................", "................", "................" },   /* meds */
     { ".....kkkkk......", "....kyyyyyk.....", "...kyywyyyyk....", "..kyywyyyyyyk...", "..kyyyyyyyyyk...", "..kyyyyyyyyyk...", "..kYyyyyyyyYk...", "...kYyyyyyYk....", "....kYYYYYk.....", ".....kcccCk.....", ".....kcccCk.....", ".....kCCCCk.....", "......kkkk......", "................", "................", "................" },   /* light */
@@ -686,10 +688,16 @@ static int s_train_round, s_train_hits;
 static float s_train_t0, s_train_msg_until, s_train_next_round;
 static bool s_train_firing, s_train_round_done;
 static volatile int s_toy_debug_req;   /* from the console: 1 stats, 2 training, 3 a bubble */
+/* Battle. */
+static lv_obj_t *s_bt, *s_bt_msg, *s_bt_ename, *s_bt_ebar, *s_bt_name, *s_bt_bar, *s_bt_menu[4], *s_bt_menu_lbl[4];
+static int s_bt_sel;
+static bool s_bt_shown;
+static void battle_press(int b);
+static void battle_theme(void);
 
 void muse_ui_pet_debug(const char *what)
 {
-    s_toy_debug_req = !strcmp(what, "stats") ? 1 : !strcmp(what, "train") ? 2 : !strcmp(what, "bubble") ? 3 : 0;
+    s_toy_debug_req = !strcmp(what, "stats") ? 1 : !strcmp(what, "train") ? 2 : !strcmp(what, "bubble") ? 3 : !strcmp(what, "battle") ? 4 : 0;
 }
 
 static void upper(char *s)
@@ -833,6 +841,9 @@ static void apply_theme(void)
     lv_obj_set_style_text_color(s_train_msg, lv_color_hex(t->neon), 0);
     lv_obj_set_style_bg_color(s_train_fire, lv_color_hex(t->neon), 0);
     lv_obj_set_style_border_color(s_train_fire, lv_color_hex(t->text), 0);
+    if (s_bt) {
+        battle_theme();
+    }
     uint32_t c = t->lcd;
     muse_pixel_set_background((uint16_t)((((c >> 16) & 0xff) >> 3) << 11 | (((c >> 8) & 0xff) >> 2) << 5 | ((c & 0xff) >> 3)));
     invalidate_muse();
@@ -1049,6 +1060,11 @@ static void toy_activate(int which, float now)
             bubble_show(v.stage == PET_EGG ? "..." : v.asleep ? "zzz..." : "*munch* ...later.", 3);
         }
         break;
+    case ICON_BATTLE:
+        if (!pet_battle_start(false)) {
+            bubble_show(v.stage < PET_KID ? "Too little to fight!" : v.asleep ? "zzz..." : "Not now.", 3);
+        }
+        break;
     case ICON_TRAIN:
         if (v.stage == PET_EGG || v.asleep) {
             bubble_show(v.stage == PET_EGG ? "..." : "zzz...", 3);
@@ -1084,7 +1100,7 @@ static void on_toy_icon(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     float now = (float)esp_timer_get_time() / 1e6f;
-    if (s_train_on) {
+    if (s_train_on || s_bt_shown) {
         return;
     }
     select_icon(i);
@@ -1096,6 +1112,10 @@ static void on_toy_button(lv_event_t *e)
     int b = (int)(intptr_t)lv_event_get_user_data(e);
     float now = (float)esp_timer_get_time() / 1e6f;
     muse_state_poke();
+    if (s_bt_shown) {
+        battle_press(b);
+        return;
+    }
     if (s_train_on) {
         train_press(b, now);
         return;
@@ -1130,6 +1150,169 @@ static lv_obj_t *plain(lv_obj_t *parent)
     lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
     return o;
 }
+
+/* ---- battle: the HP bars, the message and the move menu over the LCD ---------------------- */
+
+static void battle_menu_highlight(void)
+{
+    const theme_t *t = theme();
+    for (int i = 0; i < 4; i++) {
+        bool sel = i == s_bt_sel;
+        lv_obj_set_style_bg_opa(s_bt_menu[i], sel ? LV_OPA_70 : LV_OPA_20, 0);
+        lv_obj_set_style_bg_color(s_bt_menu[i], lv_color_hex(sel ? t->neon : t->lcd_line), 0);
+        lv_obj_set_style_text_color(s_bt_menu_lbl[i], lv_color_hex(sel ? t->lcd : t->text), 0);
+    }
+}
+
+static void battle_press(int b)
+{
+    pet_view_t v;
+    pet_view(&v);
+    if (v.battle_phase == PET_BT_MENU) {
+        if (b == 0) {
+            s_bt_sel = (s_bt_sel + 1) % 4;
+            battle_menu_highlight();
+        } else if (b == 1) {
+            pet_battle_choose(s_bt_sel);
+        } else {
+            pet_battle_choose(PET_MOVE_RUN);
+        }
+    } else if (v.battle_phase >= PET_BT_WON || v.battle_phase == PET_BT_INTRO) {
+        pet_battle_dismiss();
+    }
+}
+
+static void on_battle_menu(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    s_bt_sel = i;
+    battle_menu_highlight();
+    pet_battle_choose(i);
+}
+
+static void build_battle(lv_obj_t *face)
+{
+    s_bt = plain(face);
+    lv_obj_set_size(s_bt, LCD_W - 12, LCD_H - 12);
+    lv_obj_set_pos(s_bt, LCD_X + 6, LCD_Y + 6);
+    lv_obj_add_flag(s_bt, LV_OBJ_FLAG_HIDDEN);
+    s_bt_msg = make_label(s_bt, &lv_font_unscii_16, 0xffffff);
+    lv_obj_set_width(s_bt_msg, LCD_W - 28);
+    lv_label_set_long_mode(s_bt_msg, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_style_text_align(s_bt_msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_bt_msg, LV_ALIGN_TOP_MID, 0, 4);
+    /* The enemy's bar, top right; ours, bottom left above the menu. */
+    s_bt_ename = make_label(s_bt, &lv_font_unscii_8, 0xffffff);
+    lv_obj_set_style_text_align(s_bt_ename, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(s_bt_ename, LV_ALIGN_TOP_RIGHT, -8, 46);
+    s_bt_ebar = lv_bar_create(s_bt);
+    lv_obj_remove_style_all(s_bt_ebar);
+    lv_obj_set_size(s_bt_ebar, 110, 8);
+    lv_obj_align(s_bt_ebar, LV_ALIGN_TOP_RIGHT, -8, 58);
+    s_bt_name = make_label(s_bt, &lv_font_unscii_8, 0xffffff);
+    lv_obj_set_style_text_align(s_bt_name, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(s_bt_name, LV_ALIGN_TOP_LEFT, 8, LCD_H - 12 - 102);
+    s_bt_bar = lv_bar_create(s_bt);
+    lv_obj_remove_style_all(s_bt_bar);
+    lv_obj_set_size(s_bt_bar, 110, 8);
+    lv_obj_align(s_bt_bar, LV_ALIGN_TOP_LEFT, 8, LCD_H - 12 - 90);
+    for (lv_obj_t *bar = s_bt_ebar;; bar = s_bt_bar) {
+        lv_bar_set_range(bar, 0, 100);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar, 3, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
+        if (bar == s_bt_bar) {
+            break;
+        }
+    }
+    /* The menu: 2 x 2. */
+    const int mw = (LCD_W - 12 - 16 - 6) / 2, mh = 34;
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *cell = plain(s_bt);
+        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(cell, mw, mh);
+        lv_obj_set_pos(cell, 8 + (i % 2) * (mw + 6), LCD_H - 12 - 76 + (i / 2) * (mh + 4));
+        lv_obj_set_style_radius(cell, 8, 0);
+        lv_obj_set_style_border_width(cell, 2, 0);
+        lv_obj_add_event_cb(cell, on_battle_menu, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        s_bt_menu[i] = cell;
+        s_bt_menu_lbl[i] = make_label(cell, &lv_font_unscii_8, 0xffffff);
+        lv_obj_center(s_bt_menu_lbl[i]);
+    }
+}
+
+static void battle_theme(void)
+{
+    const theme_t *t = theme();
+    lv_obj_set_style_text_color(s_bt_msg, lv_color_hex(t->neon), 0);
+    lv_obj_set_style_text_color(s_bt_ename, lv_color_hex(t->text), 0);
+    lv_obj_set_style_text_color(s_bt_name, lv_color_hex(t->text), 0);
+    for (lv_obj_t *bar = s_bt_ebar;; bar = s_bt_bar) {
+        lv_obj_set_style_bg_color(bar, lv_color_hex(t->lcd_line), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(0x45d84f), LV_PART_INDICATOR);
+        if (bar == s_bt_bar) {
+            break;
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_style_border_color(s_bt_menu[i], lv_color_hex(t->neon2), 0);
+    }
+    battle_menu_highlight();
+}
+
+static void hp_colour(lv_obj_t *bar, int hp, int max)
+{
+    int pct = max > 0 ? hp * 100 / max : 0;
+    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(pct > 50 ? 0x45d84f : pct > 20 ? 0xffe14a : 0xff3b3b), LV_PART_INDICATOR);
+}
+
+/* Each frame while a battle is on. */
+static void update_battle(const pet_view_t *v)
+{
+    if (!s_bt_shown) {
+        s_bt_shown = true;
+        s_bt_sel = 0;
+        battle_menu_highlight();
+        lv_obj_remove_flag(s_bt, LV_OBJ_FLAG_HIDDEN);
+        bubble_hide();
+        stats_hide();
+        if (s_train_on) {
+            s_train_on = false;
+            lv_obj_add_flag(s_train, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_label_set_text(s_bt_msg, v->battle_msg);
+    char line[40], stage[12];
+    strlcpy(stage, pet_stage_name((pet_stage_t)v->enemy_stage), sizeof(stage));
+    upper(stage);
+    snprintf(line, sizeof(line), "%s  %s  %s", v->enemy_name, stage, pet_element_name((pet_element_t)v->enemy_elem));
+    lv_label_set_text(s_bt_ename, line);
+    hp_colour(s_bt_ebar, v->enemy_hp, v->enemy_hp_max);
+    char me[20];
+    strlcpy(me, v->name[0] ? v->name : "YOUR DINO", sizeof(me));
+    upper(me);
+    snprintf(line, sizeof(line), "%s  %s  HP %d/%d", me, pet_element_name((pet_element_t)v->elem), v->hp, v->hp_max);
+    lv_label_set_text(s_bt_name, line);
+    hp_colour(s_bt_bar, v->hp, v->hp_max);
+    bool menu = v->battle_phase == PET_BT_MENU;
+    static const char *const FIXED[4] = { "BITE", "", "GUARD", "RUN" };
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_flag(s_bt_menu[i], LV_OBJ_FLAG_HIDDEN, !menu);
+        lv_label_set_text(s_bt_menu_lbl[i], i == 1 ? pet_special_name((pet_element_t)v->elem) : FIXED[i]);
+    }
+}
+
+static void battle_closed(void)
+{
+    if (s_bt_shown) {
+        s_bt_shown = false;
+        lv_obj_add_flag(s_bt, LV_OBJ_FLAG_HIDDEN);
+        s_toy_next_update = 0;
+    }
+}
+
 
 static void build_toy(lv_obj_t *face)
 {
@@ -1175,8 +1358,8 @@ static void build_toy(lv_obj_t *face)
     for (int i = 0; i < ICON_COUNT; i++) {
         lv_obj_t *cell = plain(face);
         lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(cell, 38, 38);
-        lv_obj_set_pos(cell, LCD_X + 9 + i * 41, LCD_Y + 7);
+        lv_obj_set_size(cell, 36, 38);
+        lv_obj_set_pos(cell, LCD_X + 6 + i * 36, LCD_Y + 7);
         lv_obj_set_style_radius(cell, 8, 0);
         lv_obj_add_event_cb(cell, on_toy_icon, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         s_toy_icons[i] = cell;
@@ -1347,6 +1530,8 @@ static void build_toy(lv_obj_t *face)
     lv_obj_align(s_train_msg, LV_ALIGN_TOP_MID, 0, 6);
     lv_obj_add_flag(s_train, LV_OBJ_FLAG_HIDDEN);
 
+    build_battle(face);
+
     /* The theme: the pet remembers it. */
     s_theme = pet_theme() % THEME_COUNT;
     apply_theme();
@@ -1405,7 +1590,7 @@ static void update_toy(float now, const char *caption, bool fresh)
     /* The icon bar makes way for the bubble. */
     bool bubbling = !lv_obj_has_flag(s_bubble, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < ICON_COUNT; i++) {
-        lv_obj_set_flag(s_toy_icons[i], LV_OBJ_FLAG_HIDDEN, bubbling || s_train_on);
+        lv_obj_set_flag(s_toy_icons[i], LV_OBJ_FLAG_HIDDEN, bubbling || s_train_on || s_bt_shown);
     }
     if (s_toy_debug_req) {
         int req = s_toy_debug_req;
@@ -1416,6 +1601,8 @@ static void update_toy(float now, const char *caption, bool fresh)
             train_start(now);
         } else if (req == 3) {
             bubble_show("Rawr! Testing the bubble, one two three. Rawr rawr.", 20);
+        } else if (req == 4) {
+            pet_battle_start(true);
         }
     }
     if (fresh) {
@@ -1428,6 +1615,22 @@ static void update_toy(float now, const char *caption, bool fresh)
     s_toy_next_update = now + 0.25f;
     pet_view_t v;
     pet_view(&v);
+    if (v.battle && v.stage >= PET_KID) {
+        update_battle(&v);
+        for (int i = 0; i < ICON_COUNT; i++) {
+            lv_obj_add_flag(s_toy_icons[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_add_flag(s_toy_strip, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_toy_mood, LV_OBJ_FLAG_HIDDEN);
+        for (int i = 0; i < 4; i++) {
+            lv_obj_add_flag(s_toy_alert[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        s_toy_next_update = now + 0.1f;
+        return;
+    }
+    battle_closed();
+    lv_obj_remove_flag(s_toy_strip, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_toy_mood, LV_OBJ_FLAG_HIDDEN);
     if (v.theme % THEME_COUNT != s_theme) {
         set_theme(v.theme);   /* Muse switched it */
     }

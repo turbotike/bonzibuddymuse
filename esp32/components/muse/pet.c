@@ -25,6 +25,7 @@
 #include "pet.h"
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -897,6 +898,443 @@ void muse_hatch_typed_reply(const char *text)
     pet_say(line, 14);
 }
 
+/* ---- battles ----------------------------------------------------------------------- */
+
+typedef struct {
+    int hp, atk, def, spd;
+} stats_t;
+
+enum { ST_LUNGE_PET, ST_LUNGE_ENEMY, ST_HIT_PET, ST_HIT_ENEMY, ST_GUARD_PET, ST_GUARD_ENEMY, ST_CHECK, ST_MISS_PET, ST_MISS_ENEMY };
+
+typedef struct {
+    bool on, wild;
+    uint8_t phase;              /* pet_battle_phase_t */
+    pet_genome_t enemy;
+    int enemy_stage, enemy_power;
+    stats_t me, en;
+    int hp, ehp;
+    bool guard, eguard;
+    uint8_t anim;               /* pet_battle_anim_t */
+    int64_t anim_us;
+    char msg[48];
+    char ename[20];
+    uint8_t steps[8];
+    uint8_t moves[8];
+    int nsteps, step;
+    int64_t until_us;           /* the current phase or step ends */
+    int64_t menu_since_us;
+    uint32_t rng;
+    int pending_move, pending_emove;
+} battle_t;
+
+static battle_t s_bt;
+static float s_next_encounter_min = -1;
+static char s_bt_report[80];      /* a result for Muse, sent from the tick task */
+static sound_t s_bt_sound;
+static bool s_bt_sound_due;
+static esp_timer_handle_t s_bt_timer;
+
+#define BT_WILD_WAIT_S 45
+#define BT_RESULT_S 6
+
+pet_element_t pet_species_element(pet_species_t sp)
+{
+    switch (sp) {
+    case PET_SP_REX: return PET_EL_FIRE;
+    case PET_SP_RAPTOR: return PET_EL_WIND;
+    case PET_SP_PTERO: return PET_EL_WIND;
+    case PET_SP_SAUROPOD: return PET_EL_LEAF;
+    case PET_SP_CERATOPS: return PET_EL_LEAF;
+    default: return PET_EL_ROCK;
+    }
+}
+
+const char *pet_element_name(pet_element_t e)
+{
+    static const char *const NAMES[PET_EL_COUNT] = { "FIRE", "WIND", "LEAF", "ROCK" };
+    return (int)e >= 0 && e < PET_EL_COUNT ? NAMES[e] : "?";
+}
+
+const char *pet_special_name(pet_element_t e)
+{
+    static const char *const NAMES[PET_EL_COUNT] = { "FLAME BLAST", "GUST", "VINE WHIP", "ROCK SMASH" };
+    return (int)e >= 0 && e < PET_EL_COUNT ? NAMES[e] : "?";
+}
+
+/* Fire beats leaf, leaf beats rock, rock beats wind, wind beats fire. */
+static float element_mult(pet_element_t a, pet_element_t d)
+{
+    if ((a == PET_EL_FIRE && d == PET_EL_LEAF) || (a == PET_EL_LEAF && d == PET_EL_ROCK) || (a == PET_EL_ROCK && d == PET_EL_WIND) ||
+        (a == PET_EL_WIND && d == PET_EL_FIRE)) {
+        return 2.0f;
+    }
+    if ((d == PET_EL_FIRE && a == PET_EL_LEAF) || (d == PET_EL_LEAF && a == PET_EL_ROCK) || (d == PET_EL_ROCK && a == PET_EL_WIND) ||
+        (d == PET_EL_WIND && a == PET_EL_FIRE)) {
+        return 0.5f;
+    }
+    return 1.0f;
+}
+
+static void battle_stats(const pet_genome_t *g, int stage, int power, stats_t *st)
+{
+    st->hp = 40 + stage * 12 + power / 3;
+    st->atk = 10 + stage * 3 + power / 6 + ((g->traits & PET_TRAIT_BOLD) ? 3 : 0) + g->teeth * 2;
+    st->def = 8 + stage * 2 + ((g->species == PET_SP_ANKYLO || g->species == PET_SP_STEGO) ? 5 : 0) + (g->back == 4 ? 2 : 0);
+    st->spd = 8 + stage * 2 + ((g->species == PET_SP_RAPTOR || g->species == PET_SP_PTERO) ? 6 : 0) - ((g->traits & PET_TRAIT_LAZY) ? 2 : 0);
+}
+
+static void bt_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void bt_msg(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(s_bt.msg, sizeof(s_bt.msg), fmt, ap);
+    va_end(ap);
+}
+
+static void bt_anim(uint8_t a, int64_t now)
+{
+    s_bt.anim = a;
+    s_bt.anim_us = now;
+}
+
+static const char *my_name_upper(char *buf, size_t cap)
+{
+    strlcpy(buf, s.name[0] ? s.name : "YOUR DINO", cap);
+    for (char *p = buf; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') {
+            *p = (char)(*p - 'a' + 'A');
+        }
+    }
+    return buf;
+}
+
+/* Under the lock. */
+static bool battle_begin(bool wild, int64_t now)
+{
+    if (s_bt.on || s.stage < PET_KID || s_asleep) {
+        return false;
+    }
+    memset(&s_bt, 0, sizeof(s_bt));
+    s_bt.on = true;
+    s_bt.wild = wild;
+    s_bt.rng = esp_random() | 1;
+    make_genome(&s_bt.enemy, esp_random(), NULL);
+    int stage = (int)s.stage + rnd(&s_bt.rng, -1, 1);
+    s_bt.enemy_stage = stage < PET_KID ? PET_KID : stage > PET_ADULT ? PET_ADULT : stage;
+    s_bt.enemy_power = rnd(&s_bt.rng, 0, (int)s.power + 15);
+    battle_stats(&s.g, s.stage == PET_ELDER ? PET_ADULT : s.stage, (int)s.power, &s_bt.me);
+    battle_stats(&s_bt.enemy, s_bt.enemy_stage, s_bt.enemy_power, &s_bt.en);
+    s_bt.hp = s_bt.me.hp;
+    s_bt.ehp = s_bt.en.hp;
+    snprintf(s_bt.ename, sizeof(s_bt.ename), "%s %s", wild ? "WILD" : "RIVAL", pet_species_name((pet_species_t)s_bt.enemy.species));
+    for (char *p = s_bt.ename; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') {
+            *p = (char)(*p - 'a' + 'A');
+        }
+    }
+    bt_msg(wild ? "A %s APPEARED!" : "%s WANTS TO FIGHT!", s_bt.ename);
+    s_bt.phase = PET_BT_INTRO;
+    s_bt.until_us = now + 2000000;
+    s_bt_sound = SND_CALL;
+    s_bt_sound_due = true;
+    ESP_LOGI(TAG, "battle: %s (stage %d, power %d) hp %d vs ours %d", s_bt.ename, s_bt.enemy_stage, s_bt.enemy_power, s_bt.ehp, s_bt.hp);
+    return true;
+}
+
+static void battle_end(int64_t now)
+{
+    (void)now;
+    s_bt.on = false;
+    s_bt.anim = PET_BA_NONE;
+}
+
+/* The enemy picks: the special when it bites, otherwise a coin, with the odd guard. */
+static int enemy_pick(void)
+{
+    pet_element_t a = pet_species_element((pet_species_t)s_bt.enemy.species), d = pet_species_element((pet_species_t)s.g.species);
+    int r = rnd(&s_bt.rng, 0, 99);
+    if (r < 10) {
+        return PET_MOVE_GUARD;
+    }
+    if (element_mult(a, d) > 1.0f) {
+        return r < 75 ? PET_MOVE_SPECIAL : PET_MOVE_BITE;
+    }
+    return r < 50 ? PET_MOVE_SPECIAL : PET_MOVE_BITE;
+}
+
+static int damage(const stats_t *att, const stats_t *def, pet_element_t ael, pet_element_t del, int move, bool guarded, bool *crit,
+                  float *mult)
+{
+    int power = move == PET_MOVE_SPECIAL ? 18 : 12;
+    *mult = move == PET_MOVE_SPECIAL ? element_mult(ael, del) : 1.0f;
+    float stab = move == PET_MOVE_SPECIAL ? 1.2f : 1.0f;
+    *crit = rnd(&s_bt.rng, 0, 9) == 0;
+    float dmg = (float)power * (att->atk + 10) / (float)(def->def + 10) * *mult * stab * (*crit ? 1.5f : 1.0f) * (guarded ? 0.5f : 1.0f) *
+                (0.85f + rnd(&s_bt.rng, 0, 15) / 100.0f);
+    return dmg < 1 ? 1 : (int)dmg;
+}
+
+static void queue_turn(int my_move, int emove)
+{
+    s_bt.nsteps = 0;
+    s_bt.step = 0;
+    bool me_first = s_bt.me.spd >= s_bt.en.spd;
+    for (int who = 0; who < 2; who++) {
+        bool pet = (who == 0) == me_first;
+        int mv = pet ? my_move : emove;
+        if (mv == PET_MOVE_GUARD) {
+            s_bt.steps[s_bt.nsteps++] = pet ? ST_GUARD_PET : ST_GUARD_ENEMY;
+        } else {
+            s_bt.steps[s_bt.nsteps] = pet ? ST_LUNGE_PET : ST_LUNGE_ENEMY;
+            s_bt.moves[s_bt.nsteps++] = (uint8_t)mv;
+            s_bt.steps[s_bt.nsteps] = pet ? ST_HIT_PET : ST_HIT_ENEMY;
+            s_bt.moves[s_bt.nsteps++] = (uint8_t)mv;
+        }
+        s_bt.steps[s_bt.nsteps++] = ST_CHECK;
+    }
+    s_bt.phase = PET_BT_ACTING;
+    s_bt.until_us = 0;
+}
+
+/* One step of the turn, under the lock. */
+static void battle_step(int64_t now)
+{
+    char me[20];
+    if (s_bt.step >= s_bt.nsteps) {
+        s_bt.guard = s_bt.eguard = false;
+        s_bt.phase = PET_BT_MENU;
+        s_bt.menu_since_us = now;
+        bt_msg("WHAT WILL %s DO?", my_name_upper(me, sizeof(me)));
+        bt_anim(PET_BA_NONE, now);
+        return;
+    }
+    uint8_t st = s_bt.steps[s_bt.step], mv = s_bt.moves[s_bt.step];
+    s_bt.step++;
+    pet_element_t mel = pet_species_element((pet_species_t)s.g.species), eel = pet_species_element((pet_species_t)s_bt.enemy.species);
+    switch (st) {
+    case ST_LUNGE_PET:
+    case ST_LUNGE_ENEMY: {
+        bool pet = st == ST_LUNGE_PET;
+        const char *move_name = mv == PET_MOVE_SPECIAL ? pet_special_name(pet ? mel : eel) : "BITE";
+        bt_msg("%s USED %s!", pet ? my_name_upper(me, sizeof(me)) : s_bt.ename, move_name);
+        bt_anim(pet ? PET_BA_PET_LUNGE : PET_BA_ENEMY_LUNGE, now);
+        s_bt.until_us = now + 600000;
+        break;
+    }
+    case ST_HIT_PET:
+    case ST_HIT_ENEMY: {
+        bool pet = st == ST_HIT_PET;
+        int acc = mv == PET_MOVE_SPECIAL ? 85 : 100;
+        if (rnd(&s_bt.rng, 0, 99) >= acc) {
+            bt_msg("%s MISSED!", pet ? my_name_upper(me, sizeof(me)) : s_bt.ename);
+            bt_anim(PET_BA_NONE, now);
+            s_bt.until_us = now + 900000;
+            break;
+        }
+        bool crit;
+        float mult;
+        int dmg = pet ? damage(&s_bt.me, &s_bt.en, mel, eel, mv, s_bt.eguard, &crit, &mult)
+                      : damage(&s_bt.en, &s_bt.me, eel, mel, mv, s_bt.guard, &crit, &mult);
+        if (pet) {
+            s_bt.ehp = s_bt.ehp - dmg < 0 ? 0 : s_bt.ehp - dmg;
+        } else {
+            s_bt.hp = s_bt.hp - dmg < 0 ? 0 : s_bt.hp - dmg;
+        }
+        if (mult > 1.0f) {
+            bt_msg("SUPER EFFECTIVE! -%d", dmg);
+        } else if (mult < 1.0f) {
+            bt_msg("NOT VERY EFFECTIVE. -%d", dmg);
+        } else if (crit) {
+            bt_msg("A CRITICAL HIT! -%d", dmg);
+        } else {
+            bt_msg("HIT! -%d", dmg);
+        }
+        bt_anim(pet ? PET_BA_ENEMY_HURT : PET_BA_PET_HURT, now);
+        s_bt_sound = SND_EAT;   /* a thump */
+        s_bt_sound_due = true;
+        s_bt.until_us = now + 1000000;
+        break;
+    }
+    case ST_GUARD_PET:
+    case ST_GUARD_ENEMY: {
+        bool pet = st == ST_GUARD_PET;
+        if (pet) {
+            s_bt.guard = true;
+        } else {
+            s_bt.eguard = true;
+        }
+        bt_msg("%s GUARDS!", pet ? my_name_upper(me, sizeof(me)) : s_bt.ename);
+        bt_anim(PET_BA_NONE, now);
+        s_bt.until_us = now + 900000;
+        break;
+    }
+    case ST_CHECK:
+        if (s_bt.ehp <= 0) {
+            bt_msg("%s FAINTED!", s_bt.ename);
+            bt_anim(PET_BA_ENEMY_FAINT, now);
+            s_bt.phase = PET_BT_WON;
+            s_bt.until_us = now + 1500000;
+            s_bt.nsteps = 0;
+        } else if (s_bt.hp <= 0) {
+            bt_msg("%s FAINTED...", my_name_upper(me, sizeof(me)));
+            bt_anim(PET_BA_PET_FAINT, now);
+            s_bt.phase = PET_BT_LOST;
+            s_bt.until_us = now + 1500000;
+            s_bt.nsteps = 0;
+        } else {
+            s_bt.until_us = now + 100000;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+/* Every 100 ms while a battle is on (an esp_timer). */
+static void battle_tick(void *arg)
+{
+    (void)arg;
+    int64_t now = esp_timer_get_time();
+    lock();
+    if (!s_bt.on) {
+        unlock();
+        return;
+    }
+    char me[20];
+    switch (s_bt.phase) {
+    case PET_BT_INTRO:
+        if (now >= s_bt.until_us) {
+            s_bt.phase = PET_BT_MENU;
+            s_bt.menu_since_us = now;
+            bt_msg("WHAT WILL %s DO?", my_name_upper(me, sizeof(me)));
+        }
+        break;
+    case PET_BT_MENU:
+        if (s_bt.wild && now - s_bt.menu_since_us > (int64_t)BT_WILD_WAIT_S * 1000000) {
+            bt_msg("THE %s WANDERED OFF.", s_bt.ename);
+            s_bt.phase = PET_BT_FLED;
+            s_bt.until_us = now + 2500000;
+        }
+        break;
+    case PET_BT_ACTING:
+        if (now >= s_bt.until_us) {
+            battle_step(now);
+        }
+        break;
+    case PET_BT_WON:
+        if (s_bt.until_us && now >= s_bt.until_us) {
+            /* The spoils. */
+            int gain = 8 + s_bt.enemy_stage * 3 + (s_bt.enemy_power > (int)s.power ? 4 : 0);
+            s.power = clampf(s.power + gain, 0, 100);
+            s.needs[PET_NEED_FUN] = clampf(s.needs[PET_NEED_FUN] + 15, 0, 100);
+            s.needs[PET_NEED_BOND] = clampf(s.needs[PET_NEED_BOND] + 5, 0, 100);
+            s.plays++;
+            s_dirty = true;
+            bt_msg("%s WON! POWER +%d", my_name_upper(me, sizeof(me)), gain);
+            set_anim(PET_ANIM_HAPPY, 4.0f);
+            s_bt_sound = SND_EVOLVE;
+            s_bt_sound_due = true;
+            snprintf(s_bt_report, sizeof(s_bt_report), "It just won a battle against a %s", s_bt.ename);
+            s_bt.until_us = 0;
+            s_bt.menu_since_us = now;
+        } else if (!s_bt.until_us && now - s_bt.menu_since_us > (int64_t)BT_RESULT_S * 1000000) {
+            battle_end(now);
+        }
+        break;
+    case PET_BT_LOST:
+        if (s_bt.until_us && now >= s_bt.until_us) {
+            s.health = clampf(s.health - 8, 0, 100);
+            s.needs[PET_NEED_FUN] = clampf(s.needs[PET_NEED_FUN] - 10, 0, 100);
+            s_dirty = true;
+            bt_msg("%s LOST...", my_name_upper(me, sizeof(me)));
+            set_anim(PET_ANIM_SAD, 4.0f);
+            s_bt_sound = SND_LEAVE;
+            s_bt_sound_due = true;
+            snprintf(s_bt_report, sizeof(s_bt_report), "It just lost a battle to a %s", s_bt.ename);
+            s_bt.until_us = 0;
+            s_bt.menu_since_us = now;
+        } else if (!s_bt.until_us && now - s_bt.menu_since_us > (int64_t)BT_RESULT_S * 1000000) {
+            battle_end(now);
+        }
+        break;
+    case PET_BT_RAN:
+    case PET_BT_FLED:
+        if (now >= s_bt.until_us) {
+            battle_end(now);
+        }
+        break;
+    default:
+        break;
+    }
+    unlock();
+}
+
+bool pet_battle_start(bool wild)
+{
+    int64_t now = esp_timer_get_time();
+    lock();
+    bool ok = battle_begin(wild, now);
+    unlock();
+    return ok;
+}
+
+bool pet_battle_choose(int move)
+{
+    int64_t now = esp_timer_get_time();
+    lock();
+    if (!s_bt.on || s_bt.phase != PET_BT_MENU) {
+        unlock();
+        return false;
+    }
+    char me[20];
+    if (move == PET_MOVE_RUN) {
+        int chance = 55 + (s_bt.me.spd - s_bt.en.spd) * 4;
+        chance = chance < 20 ? 20 : chance > 95 ? 95 : chance;
+        if (rnd(&s_bt.rng, 0, 99) < chance) {
+            bt_msg("%s GOT AWAY!", my_name_upper(me, sizeof(me)));
+            s_bt.phase = PET_BT_RAN;
+            s_bt.until_us = now + 2000000;
+            s.needs[PET_NEED_FUN] = clampf(s.needs[PET_NEED_FUN] - 3, 0, 100);
+        } else {
+            bt_msg("CAN'T ESCAPE!");
+            s_bt.nsteps = 0;
+            s_bt.step = 0;
+            int emove = enemy_pick();
+            if (emove == PET_MOVE_GUARD) {
+                emove = PET_MOVE_BITE;
+            }
+            s_bt.steps[s_bt.nsteps] = ST_LUNGE_ENEMY;
+            s_bt.moves[s_bt.nsteps++] = (uint8_t)emove;
+            s_bt.steps[s_bt.nsteps] = ST_HIT_ENEMY;
+            s_bt.moves[s_bt.nsteps++] = (uint8_t)emove;
+            s_bt.steps[s_bt.nsteps++] = ST_CHECK;
+            s_bt.phase = PET_BT_ACTING;
+            s_bt.until_us = now + 900000;
+        }
+    } else {
+        queue_turn(move < 0 ? 0 : move > 2 ? 0 : move, enemy_pick());
+    }
+    unlock();
+    return true;
+}
+
+void pet_battle_dismiss(void)
+{
+    int64_t now = esp_timer_get_time();
+    lock();
+    if (s_bt.on) {
+        if (s_bt.phase == PET_BT_MENU || s_bt.phase == PET_BT_INTRO) {
+            if (s_bt.wild) {
+                battle_end(now);
+            }
+        } else if (s_bt.phase >= PET_BT_WON) {
+            battle_end(now);
+        }
+    }
+    unlock();
+}
+
 /* ---- the tick task ------------------------------------------------------------------ */
 
 static void tick_task(void *arg)
@@ -933,7 +1371,32 @@ static void tick_task(void *arg)
         if (asleep_was && !s_asleep && ev == EV_NONE) {
             ev = EV_WOKE;
         }
+        /* Wild dinos turn up now and then while it's up and about. */
+        if (s_next_encounter_min < 0) {
+            s_next_encounter_min = 90 + (float)(esp_random() % 150);
+        }
+        if (s.stage >= PET_KID && !s_asleep && !s_bt.on) {
+            s_next_encounter_min -= dt_min;
+            if (s_next_encounter_min <= 0) {
+                s_next_encounter_min = 120 + (float)(esp_random() % 240);
+                if (!s.sick && s.health > 30 && muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+                    battle_begin(true, now);
+                }
+            }
+        }
+        bool bt_sound = s_bt_sound_due;
+        sound_t bt_snd = s_bt_sound;
+        s_bt_sound_due = false;
+        char bt_report[80];
+        strlcpy(bt_report, s_bt_report, sizeof(bt_report));
+        s_bt_report[0] = '\0';
         unlock();
+        if (bt_sound) {
+            play(bt_snd);
+        }
+        if (bt_report[0]) {
+            pet_report(bt_report);
+        }
         second++;
 
         const char *reason = NULL;
@@ -1010,6 +1473,7 @@ static void tick_task(void *arg)
     }
 }
 
+
 /* ---- public ------------------------------------------------------------------------- */
 
 void pet_init(void)
@@ -1042,6 +1506,10 @@ void pet_init(void)
     }
     s_mood = compute_mood(esp_timer_get_time());
     s_last_routine_us = esp_timer_get_time();
+    const esp_timer_create_args_t bt_args = { .callback = battle_tick, .name = "pet_battle" };
+    if (esp_timer_create(&bt_args, &s_bt_timer) == ESP_OK) {
+        esp_timer_start_periodic(s_bt_timer, 100000);
+    }
     xTaskCreate(tick_task, "pet", 6144, NULL, 3, NULL);
 }
 
@@ -1069,6 +1537,23 @@ void pet_view(pet_view_t *out)
     out->care = (uint8_t)(s.care_n > 0 ? s.care_acc / s.care_n : 60);
     out->power = (uint8_t)(s.power + 0.5f);
     out->theme = s.theme;
+    out->battle = s_bt.on;
+    if (s_bt.on) {
+        out->wild = s_bt.wild;
+        out->battle_phase = s_bt.phase;
+        out->battle_anim = s_bt.anim;
+        out->battle_anim_t = (float)(now - s_bt.anim_us) / 1e6f;
+        out->enemy = s_bt.enemy;
+        out->enemy_stage = (uint8_t)s_bt.enemy_stage;
+        out->elem = (uint8_t)pet_species_element((pet_species_t)s.g.species);
+        out->enemy_elem = (uint8_t)pet_species_element((pet_species_t)s_bt.enemy.species);
+        out->hp = (int16_t)s_bt.hp;
+        out->hp_max = (int16_t)s_bt.me.hp;
+        out->enemy_hp = (int16_t)s_bt.ehp;
+        out->enemy_hp_max = (int16_t)s_bt.en.hp;
+        strlcpy(out->battle_msg, s_bt.msg, sizeof(out->battle_msg));
+        strlcpy(out->enemy_name, s_bt.ename, sizeof(out->enemy_name));
+    }
     unlock();
 }
 
@@ -1342,13 +1827,13 @@ int pet_status_json(char *out, size_t cap)
                      "{\"name\":\"%s\",\"generation\":%u,\"stage\":\"%s\",\"age_min\":%u,\"mood\":\"%s\",\"asleep\":%s,"
                      "\"sick\":%s,\"lights_off\":%s,\"health\":%d,\"needs\":{\"food\":%d,\"energy\":%d,\"fun\":%d,"
                      "\"clean\":%d,\"bond\":%d},\"poops\":%u,\"care\":%d,\"egg_warmth\":%.2f,\"looks\":\"%s\","
-                     "\"traits\":%u,\"feeds\":%u,\"plays\":%u,\"cleans\":%u,\"time_scale\":%d,\"power\":%d,\"theme\":%u,\"last_said\":\"%s\"}",
+                     "\"traits\":%u,\"feeds\":%u,\"plays\":%u,\"cleans\":%u,\"time_scale\":%d,\"power\":%d,\"theme\":%u,\"in_battle\":%s,\"element\":\"%s\",\"last_said\":\"%s\"}",
                      s.name, (unsigned)s.generation, pet_stage_name(s.stage), (unsigned)s.age_min, pet_mood_name(s_mood),
                      s_asleep ? "true" : "false", s.sick ? "true" : "false", s.lights_off ? "true" : "false", (int)s.health,
                      (int)s.needs[0], (int)s.needs[1], (int)s.needs[2], (int)s.needs[3], (int)s.needs[4], (unsigned)s.poops,
                      (int)(s.care_n > 0 ? s.care_acc / s.care_n : 60), (double)s.egg_warmth, desc, (unsigned)s.g.traits,
                      (unsigned)s.feeds, (unsigned)s.plays, (unsigned)s.cleans, s_time_scale, (int)s.power, (unsigned)s.theme,
-                     s_last_said);
+                     s_bt.on ? "true" : "false", pet_element_name(pet_species_element((pet_species_t)s.g.species)), s_last_said);
     unlock();
     return n;
 }

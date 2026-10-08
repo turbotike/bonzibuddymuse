@@ -46,6 +46,29 @@ a neon-rimmed LCD, and three big round buttons under it.
 - **STATS** the six bars (FOOD, REST, FUN, CLEAN, LOVE, POWER), HP, care,
   generation, stage and age.
 
+## Battles
+
+Wild dinos turn up at random while it is awake (a kid or older, not sick),
+roughly every few hours, and the BATTLE icon picks a fight any time. Battles
+are Pokemon-style turns. Your dino stands on the left, the enemy mirrored on
+the right, with HP bars and a message line.
+
+- **Stats** come from the genome, the stage and POWER: HP, attack (teeth and
+  a bold nature help), defence (stego and ankylo armour), speed (raptor and
+  ptero are quick). The faster one acts first.
+- **Elements** by species: FIRE (rex), WIND (raptor, ptero), LEAF (long-neck,
+  tri-horn), ROCK (stego, ankylo). Fire beats leaf, leaf beats rock, rock
+  beats wind, wind beats fire: double damage one way, half the other.
+- **Moves:** BITE (always hits), the species' special (FLAME BLAST, GUST, VINE
+  WHIP, ROCK SMASH: stronger, 85% to hit, carries the element), GUARD (halves
+  the next blow) and RUN (likelier when you are the faster). The right arrow
+  moves along the menu, enter picks, X runs; the cells can be tapped too.
+  Criticals happen one time in ten.
+- **Winning** raises POWER (more against a stronger enemy), FUN and LOVE.
+  **Losing** costs a little health and fun. A wild dino ignored for 45 seconds
+  wanders off. Muse hears about wins and losses, and can start a wild
+  encounter with `pet.battle`.
+
 ## Its life
 
 - **Egg.** Twenty taps hatch it, or six hours. The shell is coloured like the
@@ -90,13 +113,14 @@ voice; that line is the bubble. Muse can also act:
 | `pet.set_mood` (`mood`, `minutes`) | overrides how it feels and acts for a while |
 | `pet.evolve` (`variant`) | noble, cute or feral; now if the stage is nearly over |
 | `pet.theme` (`theme`) | the colour scheme, 0-3; omitted cycles |
+| `pet.battle` | a wild dino appears and the battle begins |
 | `pet.new_egg` (`confirm`) | gives up on it and starts the next generation |
 | `pet.time_scale` (`scale`) | 1 = real time, up to 200, for watching it grow; not saved |
 | `pet.debug_stage` (`stage`) | testing: jump to a stage |
 | `pet.pet` | a stroke, as a tap |
 
 Over the USB console (`>` lines): `pet.stage=kid`, `pet.species=3`,
-`pet.ui=stats|train|bubble` for testing, and `chat=...` to type to Muse.
+`pet.ui=stats|train|bubble|battle` for testing, and `chat=...` to type to Muse.
 
 ## Code
 

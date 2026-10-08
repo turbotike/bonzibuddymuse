@@ -31,7 +31,15 @@
 #define W 128
 #define H 128
 #define FLOOR_Y 118
-#define ART 2.3f   /* the geometry was laid out on a 64 px grid; this blows it up */
+#define ART_FULL 2.3f   /* the geometry was laid out on a 64 px grid; this blows it up */
+#define ART_BATTLE 1.2f  /* two on the screen */
+static float s_art = ART_FULL;
+#define ART s_art
+/* Where a figure lands: mirrored, shifted, lowered; and which palette bank it uses. */
+static bool s_flip;
+static int s_dx, s_dy;
+static uint8_t s_bank;   /* 0 the pet, PAL_BANK the enemy */
+#define PAL_BANK 32
 #define TAU 6.2831853f
 
 enum {
@@ -70,7 +78,7 @@ enum {
 EXT_RAM_BSS_ATTR static uint8_t s_fb[W * H];
 EXT_RAM_BSS_ATTR static uint8_t s_mask[W * H];   /* the silhouette: outlined and shaded as one */
 EXT_RAM_BSS_ATTR static uint8_t s_edge[W * H];   /* the outline pixels, for the shading */
-static uint16_t s_pal[C_COUNT];
+static uint16_t s_pal[2 * PAL_BANK];   /* two banks: the pet's and an enemy's */
 static uint32_t s_pal_key = 0xffffffffu;
 static pet_view_t s_v;
 static uint16_t s_bg;   /* the LCD's colour */
@@ -108,7 +116,7 @@ static uint16_t hsv565(int h, int s, int v)
     return rgb565(r, g, b);
 }
 
-static void build_palette(const pet_view_t *v)
+static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
 {
     const pet_genome_t *g = &v->g;
     int h = g->hue, s = g->sat, h2 = g->hue2;
@@ -150,6 +158,19 @@ static void build_palette(const pet_view_t *v)
     s_pal[C_FLAME] = rgb565(255, 140, 40);
 }
 
+static void build_palette(const pet_view_t *v)
+{
+    build_palette_bank(s_pal, v);
+    if (v->battle) {
+        pet_view_t e = *v;
+        e.g = v->enemy;
+        e.stage = (pet_stage_t)v->enemy_stage;
+        e.sick = false;
+        build_palette_bank(s_pal + PAL_BANK, &e);
+        s_pal[PAL_BANK + C_BG] = s_bg;
+    }
+}
+
 uint32_t muse_pixel_accent(muse_mode_t mode)
 {
     switch (mode) {
@@ -165,10 +186,17 @@ uint32_t muse_pixel_accent(muse_mode_t mode)
 
 /* ---- primitives ------------------------------------------------------------ */
 
+static inline int tx_(int x)
+{
+    return (s_flip ? W - 1 - x : x) + s_dx;
+}
+
 static inline void px(int x, int y, uint8_t c)
 {
+    x = tx_(x);
+    y += s_dy;
     if ((unsigned)x < W && (unsigned)y < H) {
-        s_fb[y * W + x] = c;
+        s_fb[y * W + x] = c == C_BG ? C_BG : (uint8_t)(c + s_bank);
     }
 }
 
@@ -183,12 +211,20 @@ static inline void px2(int x, int y, uint8_t c)
 
 static inline void put(int x, int y, uint8_t c, bool body)
 {
+    x = tx_(x);
+    y += s_dy;
     if ((unsigned)x < W && (unsigned)y < H) {
-        s_fb[y * W + x] = c;
+        s_fb[y * W + x] = c == C_BG ? C_BG : (uint8_t)(c + s_bank);
         if (body) {
             s_mask[y * W + x] = 1;
         }
     }
+}
+
+/* A pixel's colour without its bank. */
+static inline uint8_t raw(uint8_t c)
+{
+    return c >= PAL_BANK ? (uint8_t)(c - PAL_BANK) : c;
 }
 
 static int iround(float v)
@@ -359,7 +395,7 @@ static void outline(void)
     }
     for (int i = 0; i < W * H; i++) {
         if (edge[i]) {
-            s_fb[i] = C_OUT;
+            s_fb[i] = (uint8_t)(C_OUT + s_bank);
         }
     }
 }
@@ -379,7 +415,7 @@ static void rim_shade(void)
             if (!s_mask[i]) {
                 continue;
             }
-            uint8_t c = s_fb[i], light, dark;
+            uint8_t c = raw(s_fb[i]), light, dark;
             switch (c) {
             case C_BASE: light = C_LIGHT; dark = C_DARK; break;
             case C_SEC: light = C_SEC_L; dark = C_SEC_D; break;
@@ -391,9 +427,9 @@ static void rim_shade(void)
             bool dr = edge_at(x + 1, y + 1) || edge_at(x + 2, y + 2) || edge_at(x + 3, y + 3) || edge_at(x, y + 2) || edge_at(x, y + 3) ||
                       edge_at(x + 2, y) || edge_at(x + 3, y);
             if (ul && !dr) {
-                s_fb[i] = light;
+                s_fb[i] = (uint8_t)(light + s_bank);
             } else if (dr && !ul) {
-                s_fb[i] = dark;
+                s_fb[i] = (uint8_t)(dark + s_bank);
             }
         }
     }
@@ -428,10 +464,10 @@ static void draw_egg(const pet_view_t *v, float t)
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int i = y * W + x;
-            if (s_mask[i] && s_fb[i] == C_SHELL) {
+            if (s_mask[i] && raw(s_fb[i]) == C_SHELL) {
                 float nx = (x + 0.5f - cx) / rx, ny = (y + 0.5f - cy) / ry;
                 if (nx * 0.7f + ny > 0.75f) {
-                    s_fb[i] = C_SHELL2;
+                    s_fb[i] = (uint8_t)(C_SHELL2 + s_bank);
                 }
             }
         }
@@ -653,7 +689,7 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
         if ((int)(at * 10) & 1) {
             for (int i = 0; i < W * H; i++) {
                 if (s_mask[i]) {
-                    s_fb[i] = C_WHITE;
+                    s_fb[i] = (uint8_t)(C_WHITE + s_bank);
                 }
             }
         }
@@ -935,10 +971,10 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     }
 
     /* Markings, then the outline round everything and the light on each part. */
-    if (v->stage >= PET_ADULT && g->pattern) {
+    if (v->stage >= PET_ADULT && g->pattern && !s_flip && s_dx == 0 && s_dy == 0) {
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                if (!s_mask[y * W + x] || s_fb[y * W + x] != C_BASE) {
+                if (!s_mask[y * W + x] || raw(s_fb[y * W + x]) != C_BASE) {
                     continue;
                 }
                 float dx = x + 0.5f - bx, dy = y + 0.5f - by;
@@ -955,11 +991,11 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
                         float spy = by + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * (bry * 1.6f) - bry * 0.2f;
                         float r = (1.3f + ((hsh >> 16) & 0x3) * 0.4f) * A;
                         if ((x + 0.5f - spx) * (x + 0.5f - spx) + (y + 0.5f - spy) * (y + 0.5f - spy) <= r * r) {
-                            s_fb[y * W + x] = C_SEC;
+                            s_fb[y * W + x] = (uint8_t)(C_SEC + s_bank);
                         }
                     }
                 } else if (((int)floorf((x + 0.5f - bx + (y - by) * 0.3f) / (3.0f * A)) & 1) == 0 && vv < 0.35f) {
-                    s_fb[y * W + x] = C_SEC;
+                    s_fb[y * W + x] = (uint8_t)(C_SEC + s_bank);
                 }
             }
         }
@@ -971,8 +1007,9 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         float yy = bey + i * bery * 0.45f;
         for (int x = (int)floorf(bex - berx); x <= (int)ceilf(bex + berx); x++) {
             int y = iround(yy + (x - bex) * sa);
-            if ((unsigned)x < W && (unsigned)y < H && (s_fb[y * W + x] == C_BELLY || s_fb[y * W + x] == C_BELLY_L)) {
-                s_fb[y * W + x] = C_BELLY_D;
+            int sxp = tx_(x), syp = y + s_dy;
+            if ((unsigned)sxp < W && (unsigned)syp < H && (raw(s_fb[syp * W + sxp]) == C_BELLY || raw(s_fb[syp * W + sxp]) == C_BELLY_L)) {
+                s_fb[syp * W + sxp] = (uint8_t)(C_BELLY_D + s_bank);
             }
         }
     }
@@ -990,7 +1027,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         if ((int)(at * 10) & 1) {
             for (int i = 0; i < W * H; i++) {
                 if (s_mask[i]) {
-                    s_fb[i] = C_WHITE;
+                    s_fb[i] = (uint8_t)(C_WHITE + s_bank);
                 }
             }
         }
@@ -1124,12 +1161,94 @@ static void draw_overlays(const pet_view_t *v, const face_t *f, const figure_t *
     draw_poops(v->poops);
 }
 
+
+/* ---- a battle: the pet on the left, the enemy mirrored on the right ------------------- */
+
+static float lunge(float t)
+{
+    return t < 0 ? 0 : t > 0.6f ? 0 : sinf(t / 0.6f * 3.14159f);
+}
+
+static void draw_fighter(const pet_view_t *v, const muse_pose_t *p, bool enemy)
+{
+    uint8_t ba = v->battle_anim;
+    float bt = v->battle_anim_t;
+    pet_view_t me = *v;
+    face_t f;
+    me.asleep = false;
+    me.sick = false;
+    me.poops = 0;
+    me.needs[PET_NEED_CLEAN] = 100;
+    if (enemy) {
+        me.g = v->enemy;
+        me.stage = (pet_stage_t)v->enemy_stage;
+        me.anim = PET_ANIM_IDLE;
+        me.mood = PET_MOOD_CONTENT;
+    } else if (me.anim == PET_ANIM_EAT || me.anim == PET_ANIM_CLEAN || me.anim == PET_ANIM_PLAY) {
+        me.anim = PET_ANIM_IDLE;
+    }
+    face_state(&f, &me, p);
+    f.asleep = false;
+    f.talking = f.listening = f.thinking = false;
+    bool lunging = enemy ? ba == PET_BA_ENEMY_LUNGE : ba == PET_BA_PET_LUNGE;
+    bool hurt = enemy ? ba == PET_BA_ENEMY_HURT : ba == PET_BA_PET_HURT;
+    bool faint = enemy ? ba == PET_BA_ENEMY_FAINT : ba == PET_BA_PET_FAINT;
+    if (hurt && bt < 1.0f) {
+        f.sad = true;
+        f.gy = 0.6f;
+    }
+    if (hurt && bt < 0.5f) {
+        f.blink = true;   /* eyes shut on the blow */
+    }
+    s_art = ART_BATTLE;
+    s_flip = enemy;
+    s_bank = enemy ? PAL_BANK : 0;
+    int shift = 38;
+    s_dx = enemy ? shift : -shift;
+    if (lunging) {
+        int l = (int)(lunge(bt) * 22);
+        s_dx += enemy ? -l : l;
+    }
+    if (hurt && bt < 0.5f) {
+        s_dx += (int)(sinf(bt * 60.0f) * 3);
+    }
+    float sink = faint ? clampf(bt / 0.9f, 0, 1) : 0;
+    s_dy = (int)(sink * 46);
+    if (faint && bt > 2.5f) {
+        return;   /* gone */
+    }
+    memset(s_mask, 0, sizeof(s_mask));
+    figure_t fig;
+    ellipse(W / 2.0f, FLOOR_Y + 1.5f * ART, 12.0f * ART, 1.6f * ART, C_SHADOW, false);
+    draw_dino(&me, &f, &fig);
+    if (hurt && bt < 0.45f && ((int)(bt * 24) & 1)) {
+        for (int i = 0; i < W * H; i++) {
+            if (s_mask[i]) {
+                s_fb[i] = (uint8_t)(C_WHITE + s_bank);
+            }
+        }
+    }
+    if (!enemy && (me.anim == PET_ANIM_HAPPY || me.anim == PET_ANIM_SAD)) {
+        draw_overlays(&me, &f, &fig);
+    }
+    s_flip = false;
+    s_dx = s_dy = 0;
+    s_bank = 0;
+    s_art = ART_FULL;
+}
+
+static void render_battle(const muse_pose_t *p)
+{
+    draw_fighter(&s_v, p, true);
+    draw_fighter(&s_v, p, false);
+}
+
 /* ---- the interface ---------------------------------------------------------------- */
 
 void muse_pixel_render(const muse_pose_t *p)
 {
     pet_view(&s_v);
-    uint32_t key = s_v.g.seed ^ (s_v.stage << 1) ^ (s_v.sick ? 0x80000000u : 0);
+    uint32_t key = s_v.g.seed ^ (s_v.stage << 1) ^ (s_v.sick ? 0x80000000u : 0) ^ (s_v.battle ? s_v.enemy.seed * 31u + 7u : 0);
     if (key != s_pal_key) {
         build_palette(&s_v);
         s_pal_key = key;
@@ -1144,6 +1263,10 @@ void muse_pixel_render(const muse_pose_t *p)
                 draw_star(iround(10 * ART + i * 9 * ART), iround(FLOOR_Y - 20 * ART - ph), C_STAR);
             }
         }
+        return;
+    }
+    if (s_v.battle && s_v.stage >= PET_KID) {
+        render_battle(p);
         return;
     }
     face_t f;

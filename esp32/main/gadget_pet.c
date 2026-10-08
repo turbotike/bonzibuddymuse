@@ -178,6 +178,9 @@ void gadget_pet_add_commands(cJSON *commands)
 
     add_command(commands, "pet.pet", "Pet it (a stroke), as a tap on the screen does; warms an egg.", NULL, NULL);
 
+    add_command(commands, "pet.battle",
+                "A wild dino appears and the creature battles it (Pokemon-style turns, four elements). Mat picks the moves on the"
+                " screen; the result is reported back. Not for eggs, babies or a sleeping pet.", NULL, NULL);
     req = cJSON_CreateObject();
     cJSON_AddItemToObject(req, "stage", param_spec("string", "egg, baby, kid, teen, adult or elder."));
     add_command(commands, "pet.debug_stage", "Testing only: jump the creature to a life stage (its age moves with it).", req, NULL);
@@ -318,6 +321,12 @@ cJSON *gadget_pet_command(const char *command, cJSON *params, const char *reques
     }
     if (!strcmp(sub, "pet")) {
         pet_tap();
+        return ok_with(status_payload());
+    }
+    if (!strcmp(sub, "battle")) {
+        if (!pet_battle_start(true)) {
+            return fail("not_now", "No battle now (egg, baby, asleep, or one is already on).");
+        }
         return ok_with(status_payload());
     }
     if (!strcmp(sub, "debug_stage")) {
