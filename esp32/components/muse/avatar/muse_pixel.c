@@ -40,7 +40,7 @@ static bool s_flip;
 static int s_dx, s_dy;
 static uint8_t s_bank;   /* 0 the pet, PAL_BANK the enemy */
 static bool s_eye_glow;  /* mega and feral eyes burn */
-#define PAL_BANK 40
+#define PAL_BANK 48
 #define TAU 6.2831853f
 
 enum {
@@ -77,6 +77,16 @@ enum {
     C_METAL_L,
     C_METAL_D,
     C_GLOW,
+    C_GROUND,
+    C_GROUND_D,
+    C_GRASS,
+    C_GRASS_D,
+    C_MTN,
+    C_MTN_D,
+    C_HILL,
+    C_CLOUD,
+    C_SUN,
+    C_MOON,
     C_COUNT
 };
 
@@ -86,7 +96,9 @@ EXT_RAM_BSS_ATTR static uint8_t s_edge[W * H];   /* the outline pixels, for the 
 static uint16_t s_pal[2 * PAL_BANK];   /* two banks: the pet's and an enemy's */
 static uint32_t s_pal_key = 0xffffffffu;
 static pet_view_t s_v;
-static uint16_t s_bg;   /* the LCD's colour */
+static uint16_t s_bg;   /* the sky, which the LCD matches */
+static uint16_t s_ground;
+static int s_hour = 255;
 
 /* ---- colours ------------------------------------------------------------- */
 
@@ -164,6 +176,19 @@ static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
     s_pal[C_METAL_L] = gold ? rgb565(255, 228, 140) : dark ? rgb565(160, 162, 184) : rgb565(223, 230, 242);
     s_pal[C_METAL_D] = gold ? rgb565(140, 100, 24) : dark ? rgb565(44, 44, 60) : rgb565(90, 98, 117);
     s_pal[C_GLOW] = dark ? rgb565(255, 70, 70) : rgb565(120, 255, 255);
+    /* The scene. */
+    bool night = s_hour != 255 && (s_hour >= 20 || s_hour < 6);
+    s_pal[C_GROUND] = night ? rgb565(62, 44, 34) : rgb565(118, 80, 48);
+    s_pal[C_GROUND_D] = night ? rgb565(44, 30, 24) : rgb565(88, 58, 34);
+    s_pal[C_GRASS] = night ? rgb565(34, 90, 52) : rgb565(72, 170, 80);
+    s_pal[C_GRASS_D] = night ? rgb565(22, 62, 36) : rgb565(44, 122, 54);
+    s_pal[C_MTN] = night ? rgb565(38, 42, 78) : rgb565(92, 102, 150);
+    s_pal[C_MTN_D] = night ? rgb565(26, 28, 56) : rgb565(62, 70, 112);
+    s_pal[C_HILL] = night ? rgb565(28, 70, 44) : rgb565(58, 136, 66);
+    s_pal[C_CLOUD] = night ? rgb565(70, 78, 120) : rgb565(240, 244, 255);
+    s_pal[C_SUN] = rgb565(255, 214, 70);
+    s_pal[C_MOON] = rgb565(232, 234, 255);
+    s_ground = s_pal[C_GROUND];
 }
 
 static void build_palette(const pet_view_t *v)
@@ -442,6 +467,115 @@ static void rim_shade(void)
             }
         }
     }
+}
+
+
+/* ---- the scene ------------------------------------------------------------------------ */
+
+#define GROUND_Y 100   /* the horizon row: ground from here down */
+
+static uint16_t scene_sky_colour(int hour)
+{
+    if (hour == 255) {
+        return rgb565(116, 185, 255);
+    }
+    if (hour >= 20 || hour < 6) {
+        return rgb565(12, 16, 48);
+    }
+    if (hour < 8 || hour >= 18) {
+        return rgb565(240, 160, 112);   /* dawn and dusk */
+    }
+    return rgb565(116, 185, 255);
+}
+
+/* The mountains' height at column x: a few peaks with straight slopes, the volcano flat-topped. */
+static float mountain_h(int x)
+{
+    static const float PX[5] = { 8, 34, 62, 92, 118 };
+    static const float PH[5] = { 14, 24, 18, 30, 12 };
+    static const float PS[5] = { 0.9f, 0.75f, 0.8f, 0.7f, 1.0f };
+    float h = 0;
+    for (int i = 0; i < 5; i++) {
+        float v = PH[i] - fabsf(x - PX[i]) * PS[i];
+        if (i == 3 && v > 26) {
+            v = 26;   /* the crater */
+        }
+        h = v > h ? v : h;
+    }
+    return h;
+}
+
+static void draw_scene(float t, int hour)
+{
+    bool night = hour != 255 && (hour >= 20 || hour < 6);
+    bool dusk = hour != 255 && !night && (hour < 8 || hour >= 18);
+    uint8_t bank = s_bank;
+    s_bank = 0;
+    /* Sun or moon. */
+    if (night) {
+        for (int i = 0; i < 28; i++) {
+            uint32_t hsh = hash(0x5157u, i);
+            int sx = hsh % W, sy = (hsh >> 8) % (GROUND_Y - 34);
+            if (fmodf(t * 0.7f + i * 0.37f, 3.0f) > 0.4f) {
+                px(sx, sy, C_MOON);
+            }
+        }
+        ellipse(26, 22, 9, 9, C_MOON, false);
+        ellipse(30, 19, 8, 8, C_BG, false);
+    } else {
+        int sy = dusk ? 66 : 22;
+        ellipse(26, sy, 10, 10, C_SUN, false);
+        ellipse(26, sy, 7, 7, dusk ? C_SUN : C_CLOUD, false);
+    }
+    /* Clouds drift. */
+    for (int i = 0; i < 3; i++) {
+        float cx = fmodf(t * (1.2f + i * 0.4f) + i * 47.0f, (float)(W + 40)) - 20.0f;
+        float cy = 14 + i * 13 + (i & 1) * 4;
+        ellipse(cx, cy, 9, 3.5f, C_CLOUD, false);
+        ellipse(cx - 5, cy + 1, 6, 3, C_CLOUD, false);
+        ellipse(cx + 5, cy + 1, 7, 3, C_CLOUD, false);
+    }
+    /* Mountains, with the volcano smoking. */
+    for (int x = 0; x < W; x++) {
+        int mh = (int)mountain_h(x);
+        for (int y = GROUND_Y - mh; y < GROUND_Y; y++) {
+            px(x, y, (x & 3) == 0 && y < GROUND_Y - mh + 3 ? C_MTN_D : C_MTN);
+        }
+        /* Snow on the tallest. */
+        if (mh > 20 && x >= 82 && x <= 102 && mountain_h(x) > 22) {
+            px(x, GROUND_Y - mh, C_CLOUD);
+        }
+    }
+    px2(90, GROUND_Y - 26, C_FLAME);
+    px2(92, GROUND_Y - 27, C_SUN);
+    for (int i = 0; i < 4; i++) {
+        float ph = fmodf(t * 4.0f + i * 5.0f, 20.0f);
+        ellipse(91 + sinf(t + i) * 2 + ph * 0.3f, GROUND_Y - 29 - ph, 2.5f + ph * 0.15f, 2.0f + ph * 0.1f, C_MTN_D, false);
+    }
+    /* Hills in front, grassy. */
+    for (int x = 0; x < W; x++) {
+        float hh = 5.0f + 3.5f * sinf(x * 0.09f + 1.0f) + 2.0f * sinf(x * 0.21f);
+        for (int y = GROUND_Y - (int)hh; y < GROUND_Y; y++) {
+            px(x, y, y < GROUND_Y - (int)hh + 2 ? C_GRASS : C_HILL);
+        }
+    }
+    /* The ground: dirt, a grass verge, pebbles and tufts. */
+    for (int y = GROUND_Y; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            uint32_t hsh = hash(x, y);
+            uint8_t c = y < GROUND_Y + 3 ? ((hsh & 3) == 0 ? C_GRASS_D : C_GRASS) : ((hsh & 31) == 0 ? C_GROUND_D : C_GROUND);
+            px(x, y, c);
+        }
+    }
+    for (int i = 0; i < 14; i++) {
+        uint32_t hsh = hash(0x6166u, i);
+        int gx = hsh % W, gy = GROUND_Y + 4 + (hsh >> 8) % 20;
+        px(gx, gy, C_GRASS_D);
+        px(gx, gy - 1, C_GRASS);
+        px(gx + 1, gy, C_GRASS_D);
+        px(gx - 1, gy - 1, C_GRASS);
+    }
+    s_bank = bank;
 }
 
 /* ---- the egg ---------------------------------------------------------------- */
@@ -1292,13 +1426,17 @@ static void render_battle(const muse_pose_t *p)
 void muse_pixel_render(const muse_pose_t *p)
 {
     pet_view(&s_v);
-    uint32_t key = s_v.g.seed ^ (s_v.stage << 1) ^ (s_v.sick ? 0x80000000u : 0) ^ (s_v.battle ? s_v.enemy.seed * 31u + 7u : 0);
+    s_hour = s_v.hour;
+    s_bg = scene_sky_colour(s_hour);
+    uint32_t key = s_v.g.seed ^ (s_v.stage << 1) ^ (s_v.sick ? 0x80000000u : 0) ^ (s_v.battle ? s_v.enemy.seed * 31u + 7u : 0) ^
+                   ((uint32_t)s_hour << 24);
     if (key != s_pal_key) {
         build_palette(&s_v);
         s_pal_key = key;
     }
     memset(s_fb, C_BG, sizeof(s_fb));
     memset(s_mask, 0, sizeof(s_mask));
+    draw_scene(p->t, s_hour);
     if (s_v.stage == PET_EGG) {
         draw_egg(&s_v, s_v.anim == PET_ANIM_HATCH ? s_v.anim_t : p->t);
         if (s_v.anim == PET_ANIM_LEAVE) {
@@ -1355,8 +1493,17 @@ void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int 
 
 void muse_pixel_set_background(uint16_t rgb565)
 {
-    s_bg = rgb565;
-    s_pal_key = 0xffffffffu;   /* rebuild the palette */
+    (void)rgb565;   /* the scene's sky is the background now */
+}
+
+uint16_t muse_pixel_scene_sky(void)
+{
+    return s_bg;
+}
+
+uint16_t muse_pixel_scene_ground(void)
+{
+    return s_ground;
 }
 
 void muse_pixel_blank_rows(int px_size, int *top, int *bottom)

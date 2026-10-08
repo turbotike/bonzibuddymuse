@@ -1537,6 +1537,8 @@ void pet_view(pet_view_t *out)
     out->care = (uint8_t)(s.care_n > 0 ? s.care_acc / s.care_n : 60);
     out->power = (uint8_t)(s.power + 0.5f);
     out->theme = s.theme;
+    int hr = local_hour();
+    out->hour = (uint8_t)(hr < 0 ? 255 : hr);
     out->battle = s_bt.on;
     if (s_bt.on) {
         out->wild = s_bt.wild;

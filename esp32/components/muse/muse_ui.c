@@ -666,7 +666,8 @@ static uint32_t icon_colour(char c)
 #define TOY_BUBBLE_S 12
 #define TRAIN_ROUNDS 5
 
-static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_rim, *s_toy_lcd, *s_toy_brand;
+static lv_obj_t *s_toy_frame, *s_toy_body, *s_toy_rim, *s_toy_lcd, *s_toy_brand, *s_toy_ground, *s_toy_strip_bg;
+static uint16_t s_toy_sky = 0xffff, s_toy_dirt = 0xffff;
 static lv_obj_t *s_toy_socket[3], *s_toy_gloss[3];
 static lv_obj_t *s_toy_icons[ICON_COUNT], *s_toy_icon_imgs[ICON_COUNT];
 static lv_obj_t *s_toy_btn[3], *s_toy_btn_lbl[3];
@@ -785,7 +786,6 @@ static void apply_theme(void)
     lv_obj_set_style_bg_color(s_toy_frame, lv_color_hex(t->frame), 0);
     lv_obj_set_style_bg_color(s_toy_body, lv_color_hex(t->frame_dark), 0);
     lv_obj_set_style_border_color(s_toy_body, lv_color_hex(t->lcd_line), 0);
-    lv_obj_set_style_bg_color(s_toy_lcd, lv_color_hex(t->lcd), 0);
     lv_obj_set_style_border_color(s_toy_lcd, lv_color_hex(t->neon), 0);
     for (int i = 0; i < ICON_COUNT; i++) {
         bool sel = i == s_toy_sel;
@@ -844,8 +844,7 @@ static void apply_theme(void)
     if (s_bt) {
         battle_theme();
     }
-    uint32_t c = t->lcd;
-    muse_pixel_set_background((uint16_t)((((c >> 16) & 0xff) >> 3) << 11 | (((c >> 8) & 0xff) >> 2) << 5 | ((c & 0xff) >> 3)));
+    s_toy_sky = s_toy_dirt = 0xffff;   /* the scene recolours the LCD on the next frame */
     invalidate_muse();
 }
 
@@ -1195,6 +1194,9 @@ static void build_battle(lv_obj_t *face)
     s_bt = plain(face);
     lv_obj_set_size(s_bt, LCD_W - 12, LCD_H - 12);
     lv_obj_set_pos(s_bt, LCD_X + 6, LCD_Y + 6);
+    lv_obj_set_style_bg_color(s_bt, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_bt, LV_OPA_30, 0);
+    lv_obj_set_style_radius(s_bt, 10, 0);
     lv_obj_add_flag(s_bt, LV_OBJ_FLAG_HIDDEN);
     s_bt_msg = make_label(s_bt, &lv_font_unscii_16, 0xffffff);
     lv_obj_set_width(s_bt_msg, LCD_W - 28);
@@ -1349,6 +1351,12 @@ static void build_toy(lv_obj_t *face)
     lv_obj_set_style_radius(s_toy_lcd, 14, 0);
     lv_obj_set_style_border_width(s_toy_lcd, 3, 0);
     lv_obj_move_to_index(s_toy_lcd, 3);
+    lv_obj_set_style_clip_corner(s_toy_lcd, true, 0);
+    /* The ground continues under the canvas to the LCD's foot. */
+    s_toy_ground = plain(s_toy_lcd);
+    lv_obj_set_size(s_toy_ground, LCD_W - 6, LCD_H - 3 - 208);
+    lv_obj_set_pos(s_toy_ground, 0, 208 - 3);
+    lv_obj_set_style_bg_opa(s_toy_ground, LV_OPA_COVER, 0);
     s_toy_brand = make_label(face, &lv_font_unscii_8, 0xffffff);
     lv_label_set_text(s_toy_brand, "DINO-PET 2000");
     lv_obj_set_style_text_letter_space(s_toy_brand, 2, 0);
@@ -1367,23 +1375,24 @@ static void build_toy(lv_obj_t *face)
         lv_obj_center(s_toy_icon_imgs[i]);
     }
 
-    /* The strip under the creature: name, stage and age; mood; alerts; the system's caption. */
+    /* The strip under the creature: name, stage and age; mood; alerts; the system's caption,
+     * on a dark band so it reads over the ground. */
     s_toy_strip = make_label(face, &lv_font_unscii_16, 0xffffff);
     lv_obj_set_style_text_align(s_toy_strip, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_pos(s_toy_strip, LCD_X + 14, LCD_Y + LCD_H - 96);
+    lv_obj_set_pos(s_toy_strip, LCD_X + 14, LCD_Y + LCD_H - 46);
     s_toy_mood = make_label(face, &lv_font_unscii_8, 0xffffff);
     lv_obj_set_style_text_align(s_toy_mood, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_pos(s_toy_mood, LCD_X + 14, LCD_Y + LCD_H - 74);
+    lv_obj_set_pos(s_toy_mood, LCD_X + 14, LCD_Y + LCD_H - 24);
     for (int i = 0; i < 4; i++) {
         static const int ART[4] = { ICON_FOOD, ICON_CLEAN, ICON_MEDS, ICON_HEART };
         s_toy_alert[i] = make_icon(face, ART[i], 16, 0xffffff);
-        lv_obj_set_pos(s_toy_alert[i], LCD_X + LCD_W - 14 - 20 * (4 - i), LCD_Y + LCD_H - 76);
+        lv_obj_set_pos(s_toy_alert[i], LCD_X + LCD_W - 14 - 20 * (4 - i), LCD_Y + LCD_H - 48);
         lv_obj_add_flag(s_toy_alert[i], LV_OBJ_FLAG_HIDDEN);
     }
     s_toy_caption = make_label(face, &lv_font_unscii_8, 0xffffff);
     lv_obj_set_width(s_toy_caption, LCD_W - 28);
     lv_label_set_long_mode(s_toy_caption, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_pos(s_toy_caption, LCD_X + 14, LCD_Y + LCD_H - 46);
+    lv_obj_set_pos(s_toy_caption, LCD_X + 14, LCD_Y + LCD_H - 62);
     lv_obj_add_flag(s_toy_caption, LV_OBJ_FLAG_HIDDEN);
 
     /* The buttons under the LCD. */
@@ -1562,6 +1571,13 @@ static void update_toy(float now, const char *caption, bool fresh)
     lv_obj_add_flag(s_caption_lbl, LV_OBJ_FLAG_HIDDEN);
     if (s_reply_box) {
         lv_obj_add_flag(s_reply_box, LV_OBJ_FLAG_HIDDEN);
+    }
+    uint16_t sky = muse_pixel_scene_sky(), dirt = muse_pixel_scene_ground();
+    if (sky != s_toy_sky || dirt != s_toy_dirt) {
+        s_toy_sky = sky;
+        s_toy_dirt = dirt;
+        lv_obj_set_style_bg_color(s_toy_lcd, lv_color_make((sky >> 11) << 3, ((sky >> 5) & 0x3f) << 2, (sky & 0x1f) << 3), 0);
+        lv_obj_set_style_bg_color(s_toy_ground, lv_color_make((dirt >> 11) << 3, ((dirt >> 5) & 0x3f) << 2, (dirt & 0x1f) << 3), 0);
     }
     train_tick(now);
     if (s_stats_until && now > s_stats_until) {

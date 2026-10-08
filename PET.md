@@ -13,10 +13,14 @@ to Muse in the app; the gadget itself shows no text beyond the bubble.
 The screen is a 90s virtual pet: a plastic shell in the theme's colour round
 a neon-rimmed LCD, and three big round buttons under it.
 
+- **The scene.** He lives in front of a mountain range with a smoking volcano,
+  rolling hills and a dirt-and-grass ground. The sky follows the clock: blue
+  by day, peach at dawn and dusk, deep night with stars and a moon from
+  20:00 to 06:00. The LCD takes the sky colour so the scene fills it.
 - **The LCD** shows the creature, an icon bar along the top (FOOD, TRAIN,
-  CLEAN, MEDS, LIGHT, STATS, THEME) and, under the creature, its name, stage,
-  age, mood, HP and POWER. Little icons blink there when it is hungry, dirty,
-  sick, lonely or bored.
+  BATTLE, CLEAN, MEDS, LIGHT, STATS, THEME) and, along the foot on the ground,
+  its name, stage, age, mood, HP and POWER. Little icons blink there when it
+  is hungry, dirty, sick, lonely or bored.
 - **Buttons:** the right arrow moves the highlight along the icons, the
   enter arrow does the highlighted thing (or opens the stats page when
   nothing is highlighted), the X cancels and closes pages and bubbles. Icons

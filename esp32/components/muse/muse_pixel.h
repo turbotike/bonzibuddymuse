@@ -66,3 +66,6 @@ void muse_pixel_blank_rows(int px, int *top, int *bottom);
 
 /* The colour behind the figure (RGB565), so the canvas melts into the screen's LCD. */
 void muse_pixel_set_background(uint16_t rgb565);
+/* The scene's sky and ground colours (RGB565), for the screen round the canvas to match. */
+uint16_t muse_pixel_scene_sky(void);
+uint16_t muse_pixel_scene_ground(void);
