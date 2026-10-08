@@ -41,7 +41,7 @@ static int s_dx, s_dy;
 static uint8_t s_bank;   /* 0 the pet, PAL_BANK the enemy */
 static bool s_eye_glow;  /* mega and feral eyes burn */
 static float s_roam_walk, s_roam_hop;   /* pacing: the legs' step and a hop, from the frame */
-#define PAL_BANK 48
+#define PAL_BANK 56
 #define TAU 6.2831853f
 
 enum {
@@ -90,6 +90,9 @@ enum {
     C_MOON,
     C_CLOUD_D,
     C_RAIN,
+    C_ACC,
+    C_ACC_L,
+    C_ACC_D,
     C_COUNT
 };
 
@@ -140,30 +143,34 @@ static uint16_t hsv565(int h, int s, int v)
 static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
 {
     const pet_genome_t *g = &v->g;
-    int h = g->hue, s = g->sat, h2 = g->hue2;
+    int h = g->hue, s = 255, h2 = g->hue2, h3 = (g->hue2 + 85) & 255;   /* three neons, spaced */
+    (void)g->sat;
     if (v->sick) {
         h = (h * 2 + 85) / 3;   /* off colour: towards a queasy green */
         s = s * 2 / 3;
     }
     s_pal[C_BG] = s_bg;
-    s_pal[C_OUT] = hsv565(h, s * 3 / 4, 34);
-    s_pal[C_DARK] = hsv565(h, s, 135);
-    s_pal[C_BASE] = hsv565(h, s, 210);
-    s_pal[C_LIGHT] = hsv565(h, s * 3 / 4, 250);
-    s_pal[C_SEC] = hsv565(h2, s, 220);
-    s_pal[C_SEC_L] = hsv565(h2, s / 2, 255);
-    s_pal[C_SEC_D] = hsv565(h2, s, 140);
-    s_pal[C_BELLY] = v->sick ? rgb565(205, 225, 185) : rgb565(246, 228, 184);
-    s_pal[C_BELLY_L] = v->sick ? rgb565(230, 245, 215) : rgb565(255, 246, 218);
-    s_pal[C_BELLY_D] = v->sick ? rgb565(160, 180, 140) : rgb565(208, 182, 130);
+    s_pal[C_OUT] = hsv565(h, 200, 22);
+    s_pal[C_DARK] = hsv565(h, s, 165);
+    s_pal[C_BASE] = hsv565(h, s, 255);
+    s_pal[C_LIGHT] = hsv565(h, 110, 255);
+    s_pal[C_SEC] = hsv565(h2, s, 255);
+    s_pal[C_SEC_L] = hsv565(h2, 100, 255);
+    s_pal[C_SEC_D] = hsv565(h2, s, 160);
+    s_pal[C_ACC] = hsv565(h3, s, 255);
+    s_pal[C_ACC_L] = hsv565(h3, 100, 255);
+    s_pal[C_ACC_D] = hsv565(h3, s, 160);
+    s_pal[C_BELLY] = v->sick ? rgb565(205, 225, 185) : hsv565(h3, 70, 255);
+    s_pal[C_BELLY_L] = v->sick ? rgb565(230, 245, 215) : hsv565(h3, 30, 255);
+    s_pal[C_BELLY_D] = v->sick ? rgb565(160, 180, 140) : hsv565(h3, 110, 215);
     s_pal[C_EYE_W] = rgb565(250, 250, 255);
     s_pal[C_IRIS] = hsv565(g->eye_hue, 210, 220);
     s_pal[C_PUPIL] = rgb565(12, 9, 22);
     s_pal[C_MOUTH] = rgb565(60, 18, 40);
     s_pal[C_TONGUE] = rgb565(232, 122, 154);
     s_pal[C_WHITE] = rgb565(255, 255, 255);
-    s_pal[C_SHELL] = hsv565(g->hue, g->sat / 3, 240);
-    s_pal[C_SHELL2] = hsv565(g->hue2, g->sat / 2, 200);
+    s_pal[C_SHELL] = hsv565(g->hue, 120, 255);
+    s_pal[C_SHELL2] = hsv565(g->hue2, 255, 255);
     s_pal[C_HEART] = rgb565(255, 79, 139);
     s_pal[C_ZZ] = rgb565(140, 170, 255);
     s_pal[C_FOOD] = rgb565(220, 60, 50);
@@ -460,6 +467,7 @@ static void rim_shade(void)
             case C_SEC: light = C_SEC_L; dark = C_SEC_D; break;
             case C_BELLY: light = C_BELLY_L; dark = C_BELLY_D; break;
             case C_METAL: light = C_METAL_L; dark = C_METAL_D; break;
+            case C_ACC: light = C_ACC_L; dark = C_ACC_D; break;
             default: continue;
             }
             bool ul = edge_at(x - 1, y - 1) || edge_at(x - 2, y - 2) || edge_at(x - 3, y - 3) || edge_at(x, y - 2) || edge_at(x, y - 3) ||
@@ -890,6 +898,17 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
     }
     /* The belly. */
     ellipse(cx, cy + ry * 0.45f, rx * 0.55f, ry * 0.45f, C_BELLY, true);
+    /* A few markings even now. */
+    if (g->pattern == 1) {
+        for (int i = 0; i < 3; i++) {
+            uint32_t hsh = hash(g->seed, 40 + i);
+            ellipse(cx + ((hsh & 0xff) / 255.0f - 0.5f) * rx * 1.1f, cy - ry * 0.35f + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * ry * 0.6f,
+                    1.8f * ART, 1.5f * ART, i & 1 ? C_ACC : C_SEC, true);
+        }
+    } else if (g->pattern == 2) {
+        ellipse(cx - rx * 0.35f, cy - ry * 0.55f, 2.0f * ART, ry * 0.3f, C_SEC, true);
+        ellipse(cx + rx * 0.2f, cy - ry * 0.6f, 2.0f * ART, ry * 0.3f, C_ACC, true);
+    }
     outline();
     rim_shade();
     if (anim == PET_ANIM_EVOLVE && at < 2.2f) {
@@ -1040,12 +1059,12 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     }
     if (v->stage >= PET_TEEN) {
         switch (g->tail_tip) {
-        case 1: ellipse(tx, ty, 3.2f * k + A, 2.8f * k + A, C_SEC, true); break;
+        case 1: ellipse(tx, ty, 3.2f * k + A, 2.8f * k + A, C_ACC, true); break;
         case 2:
-            spike(tx, ty, -0.6f, -1, 5.0f * k + A, 3.0f * A, C_SEC, true);
-            spike(tx + 2.5f * A, ty + A, -0.2f, -1, 4.0f * k + A, 2.5f * A, C_SEC, true);
+            spike(tx, ty, -0.6f, -1, 5.0f * k + A, 3.0f * A, C_ACC, true);
+            spike(tx + 2.5f * A, ty + A, -0.2f, -1, 4.0f * k + A, 2.5f * A, C_ACC, true);
             break;
-        case 3: ellipse(tx - A, ty - A, 3.0f * k + A, 2.0f * k + A, C_SEC, true); break;
+        case 3: ellipse(tx - A, ty - A, 3.0f * k + A, 2.0f * k + A, C_ACC, true); break;
         default: break;
         }
     }
@@ -1083,18 +1102,18 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
             float u = -0.7f + 1.3f * i / (nb - 1);
             float ox = bx + u * brx * ca + bry * sa, oy = by - bry * ca + u * brx * sa;
             switch (g->back) {
-            case 1: spike(ox, oy + A, 0.15f, -1, 4.5f * k + A, 2.6f * A, C_SEC, true); break;
+            case 1: spike(ox, oy + A, 0.15f, -1, 4.5f * k + A, 2.6f * A, C_ACC, true); break;
             case 2: {
                 float h = (4.0f + 3.0f * sinf(u * 2.0f + 1.6f)) * k + A;
-                tri(ox - 2.2f * A, oy + A, ox + 2.2f * A, oy + A, ox + 0.3f * A, oy - h, C_SEC, true);
+                tri(ox - 2.2f * A, oy + A, ox + 2.2f * A, oy + A, ox + 0.3f * A, oy - h, C_ACC, true);
                 break;
             }
             case 3: {
                 float h = (7.0f + 5.0f * cosf(u * 1.8f)) * k + A;
-                tri(ox - 2.5f * A, oy + A, ox + 2.5f * A, oy + A, ox, oy - h, C_SEC, true);
+                tri(ox - 2.5f * A, oy + A, ox + 2.5f * A, oy + A, ox, oy - h, C_ACC, true);
                 break;
             }
-            case 4: ellipse(ox, oy + 0.5f * A, 1.8f * A, 1.5f * A, C_SEC, true); break;
+            case 4: ellipse(ox, oy + 0.5f * A, 1.8f * A, 1.5f * A, C_ACC, true); break;
             default: break;
             }
         }
@@ -1208,32 +1227,58 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
             by + bry * 0.4f, C_SEC, true);
     }
 
-    /* Markings, then the outline round everything and the light on each part. */
-    if (v->stage >= PET_ADULT && g->pattern && !s_flip && s_dx == 0 && s_dy == 0) {
+    /* Markings in two neons from the rookie stage: spotted stripes, spots or stripes. Walked in
+     * figure space through the transform, so they stay on the dino as it paces or fights. */
+    if (v->stage >= PET_KID) {
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                if (!s_mask[y * W + x] || raw(s_fb[y * W + x]) != C_BASE) {
+                int sxp = tx_(x), syp = y + s_dy;
+                if ((unsigned)sxp >= W || (unsigned)syp >= H) {
+                    continue;
+                }
+                int idx = syp * W + sxp;
+                if (!s_mask[idx] || raw(s_fb[idx]) != C_BASE) {
                     continue;
                 }
                 float dx = x + 0.5f - bx, dy = y + 0.5f - by;
                 float u = (dx * ca + dy * sa) / brx, vv = (-dx * sa + dy * ca) / bry;
                 bool on_body = u * u + vv * vv <= 0.85f;
-                bool on_tail = x < bx - brx * 0.6f && y < FLOOR_Y - leg_h + 2 * A;
-                if (!on_body && !on_tail) {
+                bool on_tail = x < bx - brx * 0.6f && y < FLOOR_Y - leg_h + 2 * A && y > by - bry;
+                float hdx = (x + 0.5f - hx) / hrx, hdy = (y + 0.5f - hy) / hry;
+                bool on_head = hdx * hdx + hdy * hdy <= 0.7f;
+                if (!on_body && !on_tail && !on_head) {
                     continue;
                 }
-                if (g->pattern == 1) {
-                    for (int kx = 0; kx < 8; kx++) {
+                if (g->pattern == 1 || on_head) {
+                    /* Spots, the colours alternating. */
+                    for (int kx = 0; kx < 9; kx++) {
                         uint32_t hsh = hash(g->seed, kx);
-                        float spx = bx + ((hsh & 0xff) / 255.0f - 0.5f) * (brx * 2.4f) - brx * 0.3f;
-                        float spy = by + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * (bry * 1.6f) - bry * 0.2f;
-                        float r = (1.3f + ((hsh >> 16) & 0x3) * 0.4f) * A;
+                        float spx, spy;
+                        if (kx < 6) {
+                            spx = bx + ((hsh & 0xff) / 255.0f - 0.5f) * (brx * 2.3f) - brx * 0.3f;
+                            spy = by + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * (bry * 1.5f) - bry * 0.25f;
+                        } else {
+                            spx = hx + ((hsh & 0xff) / 255.0f - 0.5f) * hrx * 1.2f;
+                            spy = hy + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * hry * 1.0f - hry * 0.2f;
+                        }
+                        float r = (1.4f + ((hsh >> 16) & 0x3) * 0.5f) * A * (kx < 6 ? 1.0f : 0.6f);
                         if ((x + 0.5f - spx) * (x + 0.5f - spx) + (y + 0.5f - spy) * (y + 0.5f - spy) <= r * r) {
-                            s_fb[y * W + x] = (uint8_t)(C_SEC + s_bank);
+                            s_fb[idx] = (uint8_t)((kx & 1 ? C_ACC : C_SEC) + s_bank);
                         }
                     }
-                } else if (((int)floorf((x + 0.5f - bx + (y - by) * 0.3f) / (3.0f * A)) & 1) == 0 && vv < 0.35f) {
-                    s_fb[y * W + x] = (uint8_t)(C_SEC + s_bank);
+                } else if (!on_head) {
+                    int band = (int)floorf((x + 0.5f - bx + (y - by) * 0.35f) / (3.2f * A));
+                    if (g->pattern == 2) {
+                        /* Two-colour stripes over the back. */
+                        if (vv < 0.35f && (band & 1) == 0) {
+                            s_fb[idx] = (uint8_t)(((band >> 1) & 1 ? C_ACC : C_SEC) + s_bank);
+                        }
+                    } else if (vv < 0.4f && (band % 3) == 0) {
+                        /* Spotted stripes: a stripe with dots of the other neon down its middle. */
+                        float within = (x + 0.5f - bx + (y - by) * 0.35f) / (3.2f * A) - band;
+                        bool dot = within > 0.3f && within < 0.7f && (((int)floorf(y / (2.6f * A)) & 1) == 0);
+                        s_fb[idx] = (uint8_t)((dot ? C_ACC : C_SEC) + s_bank);
+                    }
                 }
             }
         }
