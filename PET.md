@@ -17,9 +17,10 @@ a neon-rimmed LCD, and three big round buttons under it.
   CLEAN, MEDS, LIGHT, STATS, THEME) and, under the creature, its name, stage,
   age, mood, HP and POWER. Little icons blink there when it is hungry, dirty,
   sick, lonely or bored.
-- **Buttons:** A moves the highlight along the icons, B does the highlighted
-  thing (or opens the stats page when nothing is highlighted), C cancels and
-  closes pages and bubbles. Icons can also just be tapped.
+- **Buttons:** the right arrow moves the highlight along the icons, the
+  enter arrow does the highlighted thing (or opens the stats page when
+  nothing is highlighted), the X cancels and closes pages and bubbles. Icons
+  can also just be tapped.
 - **Tap the creature** to pet it (+love; too many taps in a row and it has had
   enough). Tap an egg to warm it.
 - **The bubble** appears at the top of the LCD for the creature's words (from
@@ -32,11 +33,11 @@ a neon-rimmed LCD, and three big round buttons under it.
 ## Care
 
 - **FEED** a meal (+40 food). It poops about 40 minutes after eating.
-- **TRAIN** Digimon-style: a marker runs up and down a meter; tap the LCD or
-  press B when it is in the zone and the dino fires at the boulder. Five
-  rounds, faster each time. Hits raise FUN, LOVE and **POWER**; the boulder
-  cracks with each hit. POWER fades slowly over days and decides, together
-  with care, how it evolves.
+- **TRAIN** is a button drill: a big arrow, enter or X flashes up on the LCD
+  with a timer bar; press that button before it runs out and the dino fires
+  at the boulder. Eight rounds, a little faster each. Hits raise FUN, LOVE
+  and **POWER**; the boulder cracks as the hits add up. POWER fades slowly
+  over days and decides, together with care, how it evolves.
 - **CLEAN** bathes it and clears the floor. Poop on the floor lowers CLEAN
   and, left there, its health.
 - **MEDS** when it is sick (two doses cure it).

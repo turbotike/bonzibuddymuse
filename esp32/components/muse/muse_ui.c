@@ -671,7 +671,8 @@ static lv_obj_t *s_toy_strip, *s_toy_mood, *s_toy_caption;
 static lv_obj_t *s_toy_alert[4];      /* hungry, dirty, sick, lonely/bored */
 static lv_obj_t *s_bubble, *s_bubble_lbl, *s_bubble_tail;
 static lv_obj_t *s_stats, *s_stats_bars[6], *s_stats_lbls[6], *s_stats_text;
-static lv_obj_t *s_train, *s_train_meter, *s_train_zone, *s_train_marker, *s_train_rock, *s_train_crack[4], *s_train_msg, *s_train_fire;
+static lv_obj_t *s_train, *s_train_prompt, *s_train_timer, *s_train_score, *s_train_rock, *s_train_crack[4], *s_train_msg, *s_train_fire;
+static int s_drill_key = -1;
 static int s_toy_sel = -1;            /* the highlighted icon */
 static int s_theme = -1;
 static float s_bubble_until;
@@ -819,9 +820,10 @@ static void apply_theme(void)
     }
     lv_obj_set_style_bg_color(s_train, lv_color_hex(t->lcd), 0);
     lv_obj_set_style_border_color(s_train, lv_color_hex(t->neon2), 0);
-    lv_obj_set_style_bg_color(s_train_meter, lv_color_hex(t->lcd_line), 0);
-    lv_obj_set_style_bg_color(s_train_zone, lv_color_hex(t->neon2), 0);
-    lv_obj_set_style_bg_color(s_train_marker, lv_color_hex(t->neon), 0);
+    lv_obj_set_style_text_color(s_train_prompt, lv_color_hex(t->neon), 0);
+    lv_obj_set_style_bg_color(s_train_timer, lv_color_hex(t->lcd_line), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_train_timer, lv_color_hex(t->neon2), LV_PART_INDICATOR);
+    lv_obj_set_style_text_color(s_train_score, lv_color_hex(t->text), 0);
     lv_obj_set_style_bg_color(s_train_rock, lv_color_hex(t->dim), 0);
     lv_obj_set_style_border_color(s_train_rock, lv_color_hex(t->lcd_line), 0);
     for (int i = 0; i < 4; i++) {
@@ -885,26 +887,9 @@ static void stats_hide(void)
     s_stats_until = 0;
 }
 
-/* ---- training: time the marker into the zone, fire at the boulder ---- */
+/* ---- training: a button drill; each hit fires at the boulder ---- */
 
-static float train_marker_pos(float now)
-{
-    float period = 1.5f - s_train_round * 0.14f;   /* faster each round */
-    float ph = fmodf((now - s_train_t0) / period, 1.0f);
-    return ph < 0.5f ? ph * 2.0f : 2.0f - ph * 2.0f;   /* 0..1..0 */
-}
-
-static float train_zone_half(void)
-{
-    return 0.13f - s_train_round * 0.012f;
-}
-
-static void train_layout_marker(float p)
-{
-    int mh = lv_obj_get_height(s_train_meter);
-    int y = (int)((1.0f - p) * (mh - 8));
-    lv_obj_set_pos(s_train_marker, -3, y);
-}
+#define DRILL_ROUNDS 8
 
 static void train_msg(const char *text, float now, float secs)
 {
@@ -913,38 +898,60 @@ static void train_msg(const char *text, float now, float secs)
     s_train_msg_until = now + secs;
 }
 
+static float drill_window(void)
+{
+    return 1.6f - s_train_round * 0.08f;   /* seconds to press; a little less each round */
+}
+
+static void drill_prompt(float now)
+{
+    static const char *const KEYS[3] = { LV_SYMBOL_RIGHT, LV_SYMBOL_NEW_LINE, LV_SYMBOL_CLOSE };   /* the buttons' faces */
+    int last = s_drill_key;
+    do {
+        s_drill_key = (int)lv_rand(0, 2);
+    } while (s_drill_key == last && lv_rand(0, 2));   /* repeats are rarer, not banned */
+    lv_label_set_text(s_train_prompt, KEYS[s_drill_key]);
+    lv_obj_remove_flag(s_train_prompt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_train_timer, LV_OBJ_FLAG_HIDDEN);
+    s_train_t0 = now;
+    s_train_round_done = false;
+    char line[24];
+    snprintf(line, sizeof(line), "%d / %d", s_train_hits, s_train_round);
+    lv_label_set_text(s_train_score, line);
+}
+
 static void train_start(float now)
 {
     s_train_on = true;
     s_train_round = 0;
     s_train_hits = 0;
-    s_train_t0 = now;
+    s_drill_key = -1;
     s_train_firing = false;
-    s_train_round_done = false;
     for (int i = 0; i < 4; i++) {
         lv_obj_add_flag(s_train_crack[i], LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_add_flag(s_train_fire, LV_OBJ_FLAG_HIDDEN);
-    float hw = train_zone_half();
-    int mh = lv_obj_get_height(s_train_meter);
-    lv_obj_set_size(s_train_zone, lv_obj_get_width(s_train_meter), (int)(mh * hw * 2));
-    lv_obj_set_pos(s_train_zone, 0, (int)(mh * (0.5f - hw)));
+    lv_obj_add_flag(s_train_prompt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_train_timer, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_train_score, "");
     lv_obj_remove_flag(s_train, LV_OBJ_FLAG_HIDDEN);
-    train_msg("TRAIN! TAP OR B\nWHEN THE MARK\nIS IN THE ZONE", now, 2.5f);
+    train_msg("DRILL! PRESS THE\nBUTTON IT SHOWS", now, 2.0f);
+    s_train_round_done = true;              /* the first prompt comes after the intro */
+    s_train_next_round = now + 2.2f;
     stats_hide();
     bubble_hide();
 }
 
 static void train_end(float now)
 {
+    (void)now;
     s_train_on = false;
     lv_obj_add_flag(s_train, LV_OBJ_FLAG_HIDDEN);
-    pet_train(s_train_hits, TRAIN_ROUNDS);
+    pet_train(s_train_hits, DRILL_ROUNDS);
     char line[48];
-    snprintf(line, sizeof(line), "%d of %d! %s", s_train_hits, TRAIN_ROUNDS,
-             s_train_hits >= 5 ? "PERFECT!" : s_train_hits >= 3 ? "Getting stronger." : "More practice...");
+    snprintf(line, sizeof(line), "%d of %d! %s", s_train_hits, DRILL_ROUNDS,
+             s_train_hits >= DRILL_ROUNDS ? "PERFECT!" : s_train_hits >= 5 ? "Getting stronger." : "More practice...");
     bubble_show(line, 5.0f);
-    (void)now;
 }
 
 static void train_fire_done(lv_anim_t *a)
@@ -952,8 +959,9 @@ static void train_fire_done(lv_anim_t *a)
     (void)a;
     lv_obj_add_flag(s_train_fire, LV_OBJ_FLAG_HIDDEN);
     s_train_firing = false;
-    if (s_train_hits > 0 && s_train_hits <= 4) {
-        lv_obj_remove_flag(s_train_crack[s_train_hits - 1], LV_OBJ_FLAG_HIDDEN);
+    int cracks = s_train_hits * 4 / DRILL_ROUNDS;
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_flag(s_train_crack[i], LV_OBJ_FLAG_HIDDEN, i >= cracks);
     }
 }
 
@@ -962,32 +970,35 @@ static void train_fire_x(void *obj, int32_t x)
     lv_obj_set_x(obj, x);
 }
 
-static void train_fire(float now)
+/* A button during the drill. */
+static void train_press(int b, float now)
 {
-    if (!s_train_on || s_train_firing || s_train_round_done) {
+    if (!s_train_on || s_train_round_done) {
         return;
     }
-    float p = train_marker_pos(now);
-    bool hit = fabsf(p - 0.5f) <= train_zone_half();
     s_train_round_done = true;
-    s_train_next_round = now + 1.3f;
-    if (hit) {
+    s_train_next_round = now + 1.0f;
+    lv_obj_add_flag(s_train_prompt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_train_timer, LV_OBJ_FLAG_HIDDEN);
+    if (b == s_drill_key) {
         s_train_hits++;
-        s_train_firing = true;
-        lv_obj_remove_flag(s_train_fire, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(s_train_fire, 150, 120);
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, s_train_fire);
-        lv_anim_set_exec_cb(&a, train_fire_x);
-        lv_anim_set_values(&a, 150, 225);
-        lv_anim_set_duration(&a, 320);
-        lv_anim_set_completed_cb(&a, train_fire_done);
-        lv_anim_start(&a);
+        if (!s_train_firing) {
+            s_train_firing = true;
+            lv_obj_remove_flag(s_train_fire, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(s_train_fire, 150, 150);
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, s_train_fire);
+            lv_anim_set_exec_cb(&a, train_fire_x);
+            lv_anim_set_values(&a, 150, 225);
+            lv_anim_set_duration(&a, 280);
+            lv_anim_set_completed_cb(&a, train_fire_done);
+            lv_anim_start(&a);
+        }
         muse_voice_request_sound(MUSE_SOUND_TICK, 1);
-        train_msg("HIT!", now, 1.2f);
+        train_msg("HIT!", now, 0.9f);
     } else {
-        train_msg("MISS", now, 1.2f);
+        train_msg("WRONG!", now, 0.9f);
     }
 }
 
@@ -998,23 +1009,24 @@ static void train_tick(float now)
     }
     if (s_train_round_done) {
         if (now >= s_train_next_round) {
-            s_train_round++;
-            s_train_round_done = false;
-            s_train_t0 = now;
-            if (s_train_round >= TRAIN_ROUNDS) {
+            if (s_train_round >= DRILL_ROUNDS) {
                 train_end(now);
                 return;
             }
-            float hw = train_zone_half();
-            int mh = lv_obj_get_height(s_train_meter);
-            lv_obj_set_size(s_train_zone, lv_obj_get_width(s_train_meter), (int)(mh * hw * 2));
-            lv_obj_set_pos(s_train_zone, 0, (int)(mh * (0.5f - hw)));
-            char line[32];
-            snprintf(line, sizeof(line), "ROUND %d / %d", s_train_round + 1, TRAIN_ROUNDS);
-            train_msg(line, now, 1.0f);
+            s_train_round++;
+            drill_prompt(now);
         }
     } else {
-        train_layout_marker(train_marker_pos(now));
+        float left = 1.0f - (now - s_train_t0) / drill_window();
+        if (left <= 0) {
+            s_train_round_done = true;
+            s_train_next_round = now + 1.0f;
+            lv_obj_add_flag(s_train_prompt, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_train_timer, LV_OBJ_FLAG_HIDDEN);
+            train_msg("TOO SLOW", now, 0.9f);
+        } else {
+            lv_bar_set_value(s_train_timer, (int)(left * 100), LV_ANIM_OFF);
+        }
     }
     if (s_train_msg_until && now > s_train_msg_until) {
         lv_obj_add_flag(s_train_msg, LV_OBJ_FLAG_HIDDEN);
@@ -1084,12 +1096,7 @@ static void on_toy_button(lv_event_t *e)
     float now = (float)esp_timer_get_time() / 1e6f;
     muse_state_poke();
     if (s_train_on) {
-        if (b == 1) {
-            train_fire(now);
-        } else if (b == 2) {
-            s_train_on = false;
-            lv_obj_add_flag(s_train, LV_OBJ_FLAG_HIDDEN);
-        }
+        train_press(b, now);
         return;
     }
     switch (b) {
@@ -1112,12 +1119,6 @@ static void on_toy_button(lv_event_t *e)
         }
         break;
     }
-}
-
-static void on_train_tap(lv_event_t *e)
-{
-    (void)e;
-    train_fire((float)esp_timer_get_time() / 1e6f);
 }
 
 static lv_obj_t *plain(lv_obj_t *parent)
@@ -1202,7 +1203,7 @@ static void build_toy(lv_obj_t *face)
     lv_obj_add_flag(s_toy_caption, LV_OBJ_FLAG_HIDDEN);
 
     /* The buttons under the LCD. */
-    static const char *const BTN[3] = { "A", "B", "C" };
+    static const char *const BTN[3] = { LV_SYMBOL_RIGHT, LV_SYMBOL_NEW_LINE, LV_SYMBOL_CLOSE };
     for (int b = 0; b < 3; b++) {
         lv_obj_t *sock = plain(face);
         lv_obj_set_size(sock, 72, 72);
@@ -1234,7 +1235,7 @@ static void build_toy(lv_obj_t *face)
         lv_obj_set_style_bg_color(gloss, lv_color_white(), 0);
         lv_obj_set_style_bg_opa(gloss, LV_OPA_40, 0);
         s_toy_gloss[b] = gloss;
-        s_toy_btn_lbl[b] = make_label(btn, &lv_font_unscii_16, 0xffffff);
+        s_toy_btn_lbl[b] = make_label(btn, &lv_font_montserrat_28, 0xffffff);
         lv_label_set_text(s_toy_btn_lbl[b], BTN[b]);
         lv_obj_align(s_toy_btn_lbl[b], LV_ALIGN_CENTER, 0, 3);
         s_toy_btn[b] = btn;
@@ -1303,18 +1304,21 @@ static void build_toy(lv_obj_t *face)
     lv_obj_set_style_bg_opa(s_train, LV_OPA_40, 0);
     lv_obj_set_style_radius(s_train, 10, 0);
     lv_obj_set_style_border_width(s_train, 2, 0);
-    lv_obj_add_event_cb(s_train, on_train_tap, LV_EVENT_PRESSED, NULL);
-    s_train_meter = plain(s_train);
-    lv_obj_set_size(s_train_meter, 14, 170);
-    lv_obj_set_pos(s_train_meter, 10, 40);
-    lv_obj_set_style_bg_opa(s_train_meter, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_train_meter, 4, 0);
-    s_train_zone = plain(s_train_meter);
-    lv_obj_set_style_bg_opa(s_train_zone, LV_OPA_COVER, 0);
-    s_train_marker = plain(s_train_meter);
-    lv_obj_set_size(s_train_marker, 20, 8);
-    lv_obj_set_style_bg_opa(s_train_marker, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_train_marker, 2, 0);
+    s_train_prompt = make_label(s_train, &lv_font_montserrat_28, 0xffffff);
+    lv_obj_align(s_train_prompt, LV_ALIGN_TOP_MID, -40, 44);
+    lv_obj_add_flag(s_train_prompt, LV_OBJ_FLAG_HIDDEN);
+    s_train_timer = lv_bar_create(s_train);
+    lv_obj_remove_style_all(s_train_timer);
+    lv_obj_set_size(s_train_timer, 120, 10);
+    lv_obj_align(s_train_timer, LV_ALIGN_TOP_MID, -40, 86);
+    lv_bar_set_range(s_train_timer, 0, 100);
+    lv_obj_set_style_bg_opa(s_train_timer, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_train_timer, 4, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_train_timer, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_train_timer, 4, LV_PART_INDICATOR);
+    lv_obj_add_flag(s_train_timer, LV_OBJ_FLAG_HIDDEN);
+    s_train_score = make_label(s_train, &lv_font_unscii_8, 0xffffff);
+    lv_obj_align(s_train_score, LV_ALIGN_TOP_RIGHT, -8, 8);
     s_train_rock = plain(s_train);
     lv_obj_set_size(s_train_rock, 64, 56);
     lv_obj_set_pos(s_train_rock, LCD_W - 24 - 76, 150);

@@ -3,16 +3,17 @@
 /*
  * AVATAR: the pet (pet.h), a dinosaur drawn from its genome, Digimon style.
  *
- * On the 64 px grid, side view, facing right. As a baby it is an in-training
- * blob: a round head with eyes, a mouth and a nub of tail. From kid on it is
- * a chibi dino that grows into its species: rex, raptor, long-neck, stego,
- * tri-horn, ankylo or ptero, with its crest, the plates, spikes, sail or bumps
- * on its back, its tail's club, spikes or tuft, teeth, a cream belly and its
- * markings. It breathes, blinks, looks about, hops when happy, chomps when
- * fed, snores Zs, sweats when sick, cries when sad, and its jaw follows
- * Muse's speech. Everything is ellipses, capsules and triangles into an
- * indexed frame, outlined as one silhouette, so any genome reads as one bold
- * pixel character.
+ * On a 128 px grid (two screen pixels per art pixel on the 256 px canvas),
+ * side view, facing right. As a baby it is an in-training blob: a round head
+ * with eyes, a mouth and a nub of tail. From kid on it is a chibi dino that
+ * grows into its species: rex, raptor, long-neck, stego, tri-horn, ankylo or
+ * ptero, with its crest, the plates, spikes, sail or bumps on its back, its
+ * tail's club, spikes or tuft, teeth, claws, a segmented cream belly and its
+ * markings. Every part is lit from the top left and shaded at the bottom
+ * right two pixels in from the silhouette, which is outlined as one, so any
+ * genome reads as a bold game sprite. It breathes, blinks, looks about, hops
+ * when happy, chomps when fed, snores Zs, sweats when sick, cries when sad,
+ * and its jaw follows Muse's speech.
  */
 
 #include "muse_pixel.h"
@@ -27,9 +28,10 @@
 
 #include "pet.h"
 
-#define W MUSE_PX_W
-#define H MUSE_PX_H
-#define FLOOR_Y 58
+#define W 128
+#define H 128
+#define FLOOR_Y 118
+#define ART 2.3f   /* the geometry was laid out on a 64 px grid; this blows it up */
 #define TAU 6.2831853f
 
 enum {
@@ -40,7 +42,10 @@ enum {
     C_LIGHT,
     C_SEC,
     C_SEC_L,
+    C_SEC_D,
     C_BELLY,
+    C_BELLY_L,
+    C_BELLY_D,
     C_EYE_W,
     C_IRIS,
     C_PUPIL,
@@ -63,8 +68,8 @@ enum {
 };
 
 EXT_RAM_BSS_ATTR static uint8_t s_fb[W * H];
-EXT_RAM_BSS_ATTR static uint8_t s_mask[W * H];   /* the silhouette: outlined as one */
-EXT_RAM_BSS_ATTR static uint8_t s_edge[W * H];
+EXT_RAM_BSS_ATTR static uint8_t s_mask[W * H];   /* the silhouette: outlined and shaded as one */
+EXT_RAM_BSS_ATTR static uint8_t s_edge[W * H];   /* the outline pixels, for the shading */
 static uint16_t s_pal[C_COUNT];
 static uint32_t s_pal_key = 0xffffffffu;
 static pet_view_t s_v;
@@ -115,13 +120,16 @@ static void build_palette(const pet_view_t *v)
         s = s / 2;   /* greying */
     }
     s_pal[C_BG] = s_bg;
-    s_pal[C_OUT] = hsv565(h, s * 3 / 4, 36);
-    s_pal[C_DARK] = hsv565(h, s, 140);
-    s_pal[C_BASE] = hsv565(h, s, 215);
-    s_pal[C_LIGHT] = hsv565(h, s * 3 / 4, 245);
-    s_pal[C_SEC] = hsv565(h2, s, 225);
+    s_pal[C_OUT] = hsv565(h, s * 3 / 4, 34);
+    s_pal[C_DARK] = hsv565(h, s, 135);
+    s_pal[C_BASE] = hsv565(h, s, 210);
+    s_pal[C_LIGHT] = hsv565(h, s * 3 / 4, 250);
+    s_pal[C_SEC] = hsv565(h2, s, 220);
     s_pal[C_SEC_L] = hsv565(h2, s / 2, 255);
-    s_pal[C_BELLY] = v->sick ? rgb565(210, 230, 190) : rgb565(248, 232, 190);
+    s_pal[C_SEC_D] = hsv565(h2, s, 140);
+    s_pal[C_BELLY] = v->sick ? rgb565(205, 225, 185) : rgb565(246, 228, 184);
+    s_pal[C_BELLY_L] = v->sick ? rgb565(230, 245, 215) : rgb565(255, 246, 218);
+    s_pal[C_BELLY_D] = v->sick ? rgb565(160, 180, 140) : rgb565(208, 182, 130);
     s_pal[C_EYE_W] = rgb565(250, 250, 255);
     s_pal[C_IRIS] = hsv565(g->eye_hue, 210, 220);
     s_pal[C_PUPIL] = rgb565(12, 9, 22);
@@ -162,6 +170,15 @@ static inline void px(int x, int y, uint8_t c)
     if ((unsigned)x < W && (unsigned)y < H) {
         s_fb[y * W + x] = c;
     }
+}
+
+/* A fat pixel: 2x2, the size of one of the old grid's. */
+static inline void px2(int x, int y, uint8_t c)
+{
+    px(x, y, c);
+    px(x + 1, y, c);
+    px(x, y + 1, c);
+    px(x + 1, y + 1, c);
 }
 
 static inline void put(int x, int y, uint8_t c, bool body)
@@ -244,7 +261,7 @@ static void line(int x0, int y0, int x1, int y1, uint8_t c, bool body)
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < 512; i++) {
         put(x0, y0, c, body);
         if (x0 == x1 && y0 == y1) {
             break;
@@ -259,6 +276,14 @@ static void line(int x0, int y0, int x1, int y1, uint8_t c, bool body)
             y0 += sy;
         }
     }
+}
+
+/* A two-pixel-wide line. */
+static void line2(int x0, int y0, int x1, int y1, uint8_t c, bool body)
+{
+    line(x0, y0, x1, y1, c, body);
+    line(x0 + 1, y0, x1 + 1, y1, c, body);
+    line(x0, y0 + 1, x1, y1 + 1, c, body);
 }
 
 /* A filled triangle. */
@@ -296,12 +321,13 @@ static void spike(float bx, float by, float dx, float dy, float len, float w, ui
     tri(bx + px_, by + py, bx - px_, by - py, bx + dx * len, by + dy * len, c, body);
 }
 
+/* A glyph from rows of '1's, each cell two pixels. */
 static void stamp(const char *const *rows, int nrows, int x0, int y0, uint8_t c)
 {
     for (int r = 0; r < nrows; r++) {
         for (int i = 0; rows[r][i]; i++) {
             if (rows[r][i] == '1') {
-                px(x0 + i, y0 + r, c);
+                px2(x0 + i * 2, y0 + r * 2, c);
             }
         }
     }
@@ -316,7 +342,7 @@ static uint32_t hash(uint32_t a, uint32_t b)
     return x;
 }
 
-/* Silhouette pixels at the edge become the outline. */
+/* Silhouette pixels at the edge become the outline (one art pixel: two on the screen). */
 static void outline(void)
 {
     uint8_t *edge = s_edge;
@@ -338,46 +364,93 @@ static void outline(void)
     }
 }
 
+static inline bool edge_at(int x, int y)
+{
+    return (unsigned)x < W && (unsigned)y < H && s_edge[y * W + x];
+}
+
+/* Light from the top left, shade at the bottom right, a couple of pixels in from the outline;
+ * every part gets its own roundness. */
+static void rim_shade(void)
+{
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int i = y * W + x;
+            if (!s_mask[i]) {
+                continue;
+            }
+            uint8_t c = s_fb[i], light, dark;
+            switch (c) {
+            case C_BASE: light = C_LIGHT; dark = C_DARK; break;
+            case C_SEC: light = C_SEC_L; dark = C_SEC_D; break;
+            case C_BELLY: light = C_BELLY_L; dark = C_BELLY_D; break;
+            default: continue;
+            }
+            bool ul = edge_at(x - 1, y - 1) || edge_at(x - 2, y - 2) || edge_at(x - 3, y - 3) || edge_at(x, y - 2) || edge_at(x, y - 3) ||
+                      edge_at(x - 2, y) || edge_at(x - 3, y);
+            bool dr = edge_at(x + 1, y + 1) || edge_at(x + 2, y + 2) || edge_at(x + 3, y + 3) || edge_at(x, y + 2) || edge_at(x, y + 3) ||
+                      edge_at(x + 2, y) || edge_at(x + 3, y);
+            if (ul && !dr) {
+                s_fb[i] = light;
+            } else if (dr && !ul) {
+                s_fb[i] = dark;
+            }
+        }
+    }
+}
+
 /* ---- the egg ---------------------------------------------------------------- */
 
 static void draw_egg(const pet_view_t *v, float t)
 {
-    float cx = W / 2.0f, ry = 17.0f, rx = 13.0f;
+    float cx = W / 2.0f, ry = 17.0f * ART, rx = 13.0f * ART;
     float cy = FLOOR_Y - ry;
     float shake = 0;
     if (v->anim == PET_ANIM_HATCH) {
-        shake = sinf(t * 40.0f) * 1.5f;
+        shake = sinf(t * 40.0f) * 1.5f * ART;
     } else if (v->egg_warmth > 0.66f) {
-        shake = sinf(t * 7.0f) * 0.8f;
+        shake = sinf(t * 7.0f) * 0.8f * ART;
     } else if (v->egg_warmth > 0.33f) {
-        shake = sinf(t * 2.0f) * 0.4f;
+        shake = sinf(t * 2.0f) * 0.4f * ART;
     }
     cx += shake;
-    ellipse(cx, cy + 1, rx * 0.9f, 1.5f, C_SHADOW, false);
+    ellipse(cx, cy + 1 * ART, rx * 0.9f, 1.5f * ART, C_SHADOW, false);
     ellipse(cx, cy, rx, ry, C_SHELL, true);
-    ellipse(cx, cy + 3, rx * 1.05f, ry * 0.75f, C_SHELL, true);
+    ellipse(cx, cy + 3 * ART, rx * 1.05f, ry * 0.75f, C_SHELL, true);
     for (int k = 0; k < 6; k++) {
         uint32_t hsh = hash(v->g.seed, 100 + k);
         float sx = cx + ((hsh & 0xff) / 255.0f - 0.5f) * rx * 1.4f;
         float sy = cy + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * ry * 1.4f;
-        ellipse(sx, sy, 1.6f, 1.6f, C_SHELL2, true);
+        ellipse(sx, sy, 1.6f * ART, 1.6f * ART, C_SHELL2, true);
     }
     outline();
+    /* A soft sheen on the shell. */
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int i = y * W + x;
+            if (s_mask[i] && s_fb[i] == C_SHELL) {
+                float nx = (x + 0.5f - cx) / rx, ny = (y + 0.5f - cy) / ry;
+                if (nx * 0.7f + ny > 0.75f) {
+                    s_fb[i] = C_SHELL2;
+                }
+            }
+        }
+    }
+    float A = ART;
     if (v->egg_warmth > 0.3f) {
-        line(iround(cx - 3), iround(cy - 6), iround(cx), iround(cy - 2), C_OUT, false);
-        line(iround(cx), iround(cy - 2), iround(cx - 2), iround(cy + 1), C_OUT, false);
+        line2(iround(cx - 3 * A), iround(cy - 6 * A), iround(cx), iround(cy - 2 * A), C_OUT, false);
+        line2(iround(cx), iround(cy - 2 * A), iround(cx - 2 * A), iround(cy + 1 * A), C_OUT, false);
     }
     if (v->egg_warmth > 0.6f) {
-        line(iround(cx + 4), iround(cy - 9), iround(cx + 2), iround(cy - 4), C_OUT, false);
-        line(iround(cx + 2), iround(cy - 4), iround(cx + 5), iround(cy - 1), C_OUT, false);
-        line(iround(cx - 6), iround(cy + 4), iround(cx - 2), iround(cy + 6), C_OUT, false);
+        line2(iround(cx + 4 * A), iround(cy - 9 * A), iround(cx + 2 * A), iround(cy - 4 * A), C_OUT, false);
+        line2(iround(cx + 2 * A), iround(cy - 4 * A), iround(cx + 5 * A), iround(cy - 1 * A), C_OUT, false);
+        line2(iround(cx - 6 * A), iround(cy + 4 * A), iround(cx - 2 * A), iround(cy + 6 * A), C_OUT, false);
     }
     if (v->egg_warmth > 0.85f) {
-        line(iround(cx - 1), iround(cy + 2), iround(cx + 3), iround(cy + 5), C_OUT, false);
-        px(iround(cx + 1), iround(cy - 11), C_OUT);
+        line2(iround(cx - 1 * A), iround(cy + 2 * A), iround(cx + 3 * A), iround(cy + 5 * A), C_OUT, false);
+        px2(iround(cx + 1 * A), iround(cy - 11 * A), C_OUT);
     }
-    px(iround(cx - 4), iround(cy - 10), C_WHITE);
-    px(iround(cx - 5), iround(cy - 9), C_WHITE);
+    ellipse(cx - 4 * A, cy - 9 * A, 2.2f, 3.0f, C_WHITE, false);
 }
 
 /* ---- glyphs and overlays --------------------------------------------------------- */
@@ -414,22 +487,23 @@ static void draw_note(int x, int y, uint8_t c)
 
 static void draw_star(int x, int y, uint8_t c)
 {
-    px(x, y, c);
-    px(x - 1, y, c);
-    px(x + 1, y, c);
-    px(x, y - 1, c);
-    px(x, y + 1, c);
+    px2(x, y, c);
+    px2(x - 2, y, c);
+    px2(x + 2, y, c);
+    px2(x, y - 2, c);
+    px2(x, y + 2, c);
 }
 
 static void draw_poops(int n)
 {
     for (int i = 0; i < n && i < 4; i++) {
-        int x = 5 + i * 7 + (i & 1) * 2;
-        int y = FLOOR_Y - 1;
-        ellipse(x, y, 3, 1.6f, C_POOP, false);
-        ellipse(x, y - 2, 2, 1.4f, C_POOP, false);
-        px(x, y - 4, C_POOP);
-        px(x + 1, y - 2, C_OUT);
+        float x = (5 + i * 7 + (i & 1) * 2) * ART;
+        float y = FLOOR_Y - 1 * ART;
+        ellipse(x, y, 3 * ART, 1.6f * ART, C_POOP, false);
+        ellipse(x, y - 2 * ART, 2 * ART, 1.4f * ART, C_POOP, false);
+        ellipse(x, y - 4 * ART, 1.2f * ART, 1.0f * ART, C_POOP, false);
+        px2(iround(x + 1 * ART), iround(y - 2 * ART), C_OUT);
+        px2(iround(x - 1.5f * ART), iround(y - 2.5f * ART), C_BELLY_D);
     }
 }
 
@@ -445,31 +519,32 @@ typedef struct {
 static void draw_eye(float ex, float ey, float er, const face_t *f)
 {
     if (f->asleep || f->blink) {
-        line(iround(ex - er), iround(ey), iround(ex + er), iround(ey), C_OUT, false);
+        line2(iround(ex - er), iround(ey), iround(ex + er), iround(ey), C_OUT, false);
         return;
     }
     if (f->arcs) {
-        line(iround(ex - er), iround(ey + 1), iround(ex), iround(ey - er * 0.7f), C_OUT, false);
-        line(iround(ex), iround(ey - er * 0.7f), iround(ex + er), iround(ey + 1), C_OUT, false);
+        line2(iround(ex - er), iround(ey + 1), iround(ex), iround(ey - er * 0.7f), C_OUT, false);
+        line2(iround(ex), iround(ey - er * 0.7f), iround(ex + er), iround(ey + 1), C_OUT, false);
         return;
     }
+    ellipse(ex, ey, er + 1, er + 1, C_OUT, false);
     ellipse(ex, ey, er, er, C_EYE_W, false);
     float ir = er * 0.62f;
     ellipse(ex + f->gx * er * 0.3f, ey + f->gy * er * 0.3f, ir, ir, C_IRIS, false);
-    float pr = er * 0.33f;
+    float pr = er * 0.36f;
     pr = pr < 1 ? 1 : pr;
     ellipse(ex + f->gx * er * 0.4f, ey + f->gy * er * 0.4f, pr, pr, C_PUPIL, false);
-    px(iround(ex - er * 0.4f), iround(ey - er * 0.4f), C_WHITE);
+    ellipse(ex - er * 0.35f, ey - er * 0.35f, er * 0.22f + 0.6f, er * 0.22f + 0.6f, C_WHITE, false);
     if (f->half) {
-        for (int y = (int)floorf(ey - er); y <= iround(ey - er * 0.15f); y++) {
-            for (int x = (int)floorf(ex - er); x <= (int)ceilf(ex + er); x++) {
-                float dx = (x + 0.5f - ex) / er, dy = (y + 0.5f - ey) / er;
+        for (int y = (int)floorf(ey - er - 1); y <= iround(ey - er * 0.15f); y++) {
+            for (int x = (int)floorf(ex - er - 1); x <= (int)ceilf(ex + er + 1); x++) {
+                float dx = (x + 0.5f - ex) / (er + 1), dy = (y + 0.5f - ey) / (er + 1);
                 if (dx * dx + dy * dy <= 1.0f) {
                     px(x, y, C_BASE);
                 }
             }
         }
-        line(iround(ex - er), iround(ey - er * 0.15f), iround(ex + er), iround(ey - er * 0.15f), C_OUT, false);
+        line2(iround(ex - er), iround(ey - er * 0.15f), iround(ex + er), iround(ey - er * 0.15f), C_OUT, false);
     }
 }
 
@@ -519,13 +594,13 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
     const pet_genome_t *g = &v->g;
     float t = f->t, at = f->at;
     pet_anim_t anim = v->anim;
-    float k = STAGE_K[PET_BABY] * (0.9f + g->size / 255.0f * 0.3f);
+    float k = STAGE_K[PET_BABY] * (0.9f + g->size / 255.0f * 0.3f) * ART;
     if (anim == PET_ANIM_HATCH) {
         k *= clampf((at - 1.5f) / 1.5f, 0.3f, 1.0f);
     }
     float r = 13.0f * k;
     float breath = sinf(t * (f->asleep ? 1.3f : 2.4f));
-    float bounce = (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? fabsf(sinf(at * 7.0f)) * 5.0f : 0;
+    float bounce = (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? fabsf(sinf(at * 7.0f)) * 5.0f * ART : 0;
     float rx = r * (1.0f - 0.03f * breath), ry = r * (1.0f + 0.04f * breath);
     if (f->asleep) {
         ry *= 0.85f;
@@ -535,44 +610,45 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
         float ch = sinf(at * 9.0f);
         ry *= 1.0f + 0.05f * ch;
     }
-    float cx = W / 2.0f + (anim == PET_ANIM_PLAY ? sinf(at * 3.5f) * 6.0f : 0);
+    float cx = W / 2.0f + (anim == PET_ANIM_PLAY ? sinf(at * 3.5f) * 6.0f * ART : 0);
     float cy = FLOOR_Y - ry - bounce;
-    ellipse(cx, FLOOR_Y + 1.5f, rx * 0.9f, 1.6f, C_SHADOW, false);
+    ellipse(cx, FLOOR_Y + 1.5f * ART, rx * 0.9f, 1.6f * ART, C_SHADOW, false);
     /* A nub of tail to the left, little feet, and the species' hint on top. */
-    ellipse(cx - rx * 0.95f, cy + ry * 0.45f, 3.0f * k + 1, 2.2f * k + 1, C_BASE, true);
-    ellipse(cx - rx * 0.45f, FLOOR_Y - 1.5f - bounce, 3.0f * k + 1, 2.0f, C_DARK, true);
-    ellipse(cx + rx * 0.45f, FLOOR_Y - 1.5f - bounce, 3.0f * k + 1, 2.0f, C_DARK, true);
+    ellipse(cx - rx * 0.95f, cy + ry * 0.45f, 3.0f * k + ART, 2.2f * k + ART, C_BASE, true);
+    ellipse(cx - rx * 0.45f, FLOOR_Y - 1.5f * ART - bounce, 3.0f * k + ART, 2.0f * ART, C_DARK, true);
+    ellipse(cx + rx * 0.45f, FLOOR_Y - 1.5f * ART - bounce, 3.0f * k + ART, 2.0f * ART, C_DARK, true);
     ellipse(cx, cy, rx, ry, C_BASE, true);
     float top = cy - ry;
     switch (g->crest) {
-    case 1: spike(cx + rx * 0.5f, top + 2, 0.3f, -1, 5.0f * k + 1, 3.5f, C_SEC, true); break;
+    case 1: spike(cx + rx * 0.5f, top + 2 * ART, 0.3f, -1, 5.0f * k + ART, 3.5f * ART, C_SEC, true); break;
     case 2:
-        spike(cx - rx * 0.35f, top + 2, -0.3f, -1, 4.5f * k + 1, 3.0f, C_SEC, true);
-        spike(cx + rx * 0.35f, top + 2, 0.3f, -1, 4.5f * k + 1, 3.0f, C_SEC, true);
+        spike(cx - rx * 0.35f, top + 2 * ART, -0.3f, -1, 4.5f * k + ART, 3.0f * ART, C_SEC, true);
+        spike(cx + rx * 0.35f, top + 2 * ART, 0.3f, -1, 4.5f * k + ART, 3.0f * ART, C_SEC, true);
         break;
     case 3:
         for (int i = 0; i < 3; i++) {
-            spike(cx - rx * 0.3f + i * rx * 0.3f, top + 2, -0.5f + i * 0.2f, -1, 5.0f * k + 1 - i, 3.0f, C_SEC, true);
+            spike(cx - rx * 0.3f + i * rx * 0.3f, top + 2 * ART, -0.5f + i * 0.2f, -1, 5.0f * k + ART - i * ART, 3.0f * ART, C_SEC, true);
         }
         break;
-    case 4: ellipse(cx, top + 3, rx * 0.8f, 4.0f * k + 1, C_SEC, true); break;
-    case 5: spike(cx - rx * 0.2f, top + 2, -0.8f, -0.7f, 7.0f * k + 1, 3.5f, C_SEC, true); break;
+    case 4: ellipse(cx, top + 3 * ART, rx * 0.8f, 4.0f * k + ART, C_SEC, true); break;
+    case 5: spike(cx - rx * 0.2f, top + 2 * ART, -0.8f, -0.7f, 7.0f * k + ART, 3.5f * ART, C_SEC, true); break;
     default:
         if (g->species == PET_SP_STEGO || g->species == PET_SP_ANKYLO) {
             for (int i = -1; i <= 1; i++) {
-                ellipse(cx + i * rx * 0.4f, top + 2, 2.0f, 2.0f, C_SEC, true);
+                ellipse(cx + i * rx * 0.4f, top + 2 * ART, 2.0f * ART, 2.0f * ART, C_SEC, true);
             }
         }
         break;
     }
     if (g->species == PET_SP_PTERO) {   /* little wing stubs */
         float flap = fabsf(sinf(t * 10.0f)) * 0.5f + 0.5f;
-        ellipse(cx - rx * 0.95f, cy - ry * 0.2f, 3.5f * k + 1, (2.5f * k + 1) * flap + 1, C_SEC, true);
-        ellipse(cx + rx * 0.95f, cy - ry * 0.2f, 3.5f * k + 1, (2.5f * k + 1) * flap + 1, C_SEC, true);
+        ellipse(cx - rx * 0.95f, cy - ry * 0.2f, 3.5f * k + ART, (2.5f * k + ART) * flap + ART, C_SEC, true);
+        ellipse(cx + rx * 0.95f, cy - ry * 0.2f, 3.5f * k + ART, (2.5f * k + ART) * flap + ART, C_SEC, true);
     }
     /* The belly. */
     ellipse(cx, cy + ry * 0.45f, rx * 0.55f, ry * 0.45f, C_BELLY, true);
     outline();
+    rim_shade();
     if (anim == PET_ANIM_EVOLVE && at < 2.2f) {
         if ((int)(at * 10) & 1) {
             for (int i = 0; i < W * H; i++) {
@@ -591,9 +667,9 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
         return;
     }
     /* The face, 3/4 on. */
-    float er = clampf(g->eye_size * 0.6f * k * 1.6f, 1.5f, rx * 0.28f);
+    float er = clampf(g->eye_size * 0.6f * k * 1.6f, 1.5f * ART, rx * 0.28f);
     if (f->listening) {
-        er += 0.5f;
+        er += 0.5f * ART;
     }
     float ey = cy - ry * 0.2f;
     if (g->eye_n == 1) {
@@ -606,42 +682,38 @@ static void draw_blob(const pet_view_t *v, const face_t *f, figure_t *fig)
         }
     }
     if (f->arcs) {
-        px(iround(cx - rx * 0.65f), iround(ey + er + 1), C_BLUSH);
-        px(iround(cx + rx * 0.65f), iround(ey + er + 1), C_BLUSH);
+        ellipse(cx - rx * 0.65f, ey + er + 1 * ART, 1.6f, 1.2f, C_BLUSH, false);
+        ellipse(cx + rx * 0.65f, ey + er + 1 * ART, 1.6f, 1.2f, C_BLUSH, false);
     }
     float my = cy + ry * 0.3f;
-    float open = f->talking ? 1.0f + f->level * 2.5f : f->eating ? (sinf(at * 9.0f) > 0 ? 2.0f : 0) : (anim == PET_ANIM_HAPPY ? 1.2f : 0);
+    float open = f->talking ? (1.0f + f->level * 2.5f) * ART : f->eating ? (sinf(at * 9.0f) > 0 ? 2.0f * ART : 0) : (anim == PET_ANIM_HAPPY ? 1.2f * ART : 0);
+    float A = ART;
     if (f->asleep) {
-        px(iround(cx), iround(my), C_OUT);
-        px(iround(cx + 1), iround(my), C_OUT);
+        line2(iround(cx), iround(my), iround(cx + 1 * A), iround(my), C_OUT, false);
     } else if (open > 0) {
-        ellipse(cx, my + open * 0.5f, 2.0f + open * 0.4f, open, C_MOUTH, false);
-        if (open > 1.5f) {
-            px(iround(cx), iround(my + open), C_TONGUE);
+        ellipse(cx, my + open * 0.5f, 2.0f * A + open * 0.4f, open, C_MOUTH, false);
+        if (open > 1.5f * A) {
+            ellipse(cx, my + open, 1.4f, 1.0f, C_TONGUE, false);
         }
         if (g->teeth) {
-            px(iround(cx - 2), iround(my), C_WHITE);
-            px(iround(cx + 2), iround(my), C_WHITE);
+            spike(cx - 2 * A, my, 0, 1, 2.0f * A, 1.6f * A, C_WHITE, false);
+            spike(cx + 2 * A, my, 0, 1, 2.0f * A, 1.6f * A, C_WHITE, false);
         }
     } else if (g->jaw == 2) {
-        spike(cx, my - 1, 0, 1, 3.0f, 5.0f, C_STAR, false);
-        px(iround(cx - 2), iround(my - 1), C_OUT);
-        px(iround(cx + 2), iround(my - 1), C_OUT);
+        spike(cx, my - 1 * A, 0, 1, 3.0f * A, 5.0f * A, C_STAR, false);
+        px2(iround(cx - 2 * A), iround(my - 1 * A), C_OUT);
+        px2(iround(cx + 2 * A), iround(my - 1 * A), C_OUT);
     } else if (f->sad || anim == PET_ANIM_SICK || v->mood == PET_MOOD_HUNGRY) {
-        px(iround(cx - 2), iround(my + 1), C_OUT);
-        px(iround(cx - 1), iround(my), C_OUT);
-        px(iround(cx), iround(my), C_OUT);
-        px(iround(cx + 1), iround(my), C_OUT);
-        px(iround(cx + 2), iround(my + 1), C_OUT);
+        line2(iround(cx - 2 * A), iround(my + 1 * A), iround(cx - 1 * A), iround(my), C_OUT, false);
+        line2(iround(cx - 1 * A), iround(my), iround(cx + 1 * A), iround(my), C_OUT, false);
+        line2(iround(cx + 1 * A), iround(my), iround(cx + 2 * A), iround(my + 1 * A), C_OUT, false);
     } else {
-        px(iround(cx - 2), iround(my - 1), C_OUT);
-        px(iround(cx - 1), iround(my), C_OUT);
-        px(iround(cx), iround(my), C_OUT);
-        px(iround(cx + 1), iround(my), C_OUT);
-        px(iround(cx + 2), iround(my - 1), C_OUT);
+        line2(iround(cx - 2 * A), iround(my - 1 * A), iround(cx - 1 * A), iround(my), C_OUT, false);
+        line2(iround(cx - 1 * A), iround(my), iround(cx + 1 * A), iround(my), C_OUT, false);
+        line2(iround(cx + 1 * A), iround(my), iround(cx + 2 * A), iround(my - 1 * A), C_OUT, false);
         if (g->teeth == 2) {
-            px(iround(cx - 1), iround(my + 1), C_WHITE);
-            px(iround(cx + 1), iround(my + 1), C_WHITE);
+            spike(cx - 1 * A, my + 1, 0, 1, 1.8f * A, 1.4f * A, C_WHITE, false);
+            spike(cx + 1 * A, my + 1, 0, 1, 1.8f * A, 1.4f * A, C_WHITE, false);
         }
     }
     fig->hx = cx;
@@ -659,9 +731,10 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     const pet_genome_t *g = &v->g;
     float t = f->t, at = f->at;
     pet_anim_t anim = v->anim;
+    const float A = ART;
     bool biped = g->species == PET_SP_REX || g->species == PET_SP_RAPTOR || g->species == PET_SP_PTERO;
     bool ptero = g->species == PET_SP_PTERO;
-    float k = STAGE_K[v->stage] * (0.85f + g->size / 255.0f * 0.3f) * 1.15f;   /* the canvas has room */
+    float k = STAGE_K[v->stage] * (0.85f + g->size / 255.0f * 0.3f) * ART * 1.1f;
     /* Chibi proportions early: a big head on a small body. */
     float head_k = v->stage == PET_KID ? 1.45f : v->stage == PET_TEEN ? 1.15f : 1.0f;
     head_k *= 0.8f + g->head_size / 255.0f * 0.4f;
@@ -669,7 +742,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     float breath = sinf(t * (f->asleep ? 1.3f : 2.2f));
     float bounce = (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? fabsf(sinf(at * 7.0f)) * 5.0f * k : 0;
     if (ptero && !f->asleep) {
-        bounce += 2.0f + sinf(t * 3.0f) * 1.5f;   /* hovering a little */
+        bounce += 2.0f * A + sinf(t * 3.0f) * 1.5f * A;   /* hovering a little */
     }
     float walk = anim == PET_ANIM_PLAY ? sinf(at * 7.0f) : 0;
 
@@ -690,21 +763,21 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         bry *= 0.9f;
         tilt *= 0.5f;
     }
-    float leg_h = (biped ? 9.0f : 6.5f) * k * body_k + 1.5f;
+    float leg_h = (biped ? 9.0f : 6.5f) * k * body_k + 1.5f * A;
     if (ptero) {
-        leg_h = 5.0f * k + 1;
+        leg_h = 5.0f * k + A;
     }
-    float bx = 29.0f + (anim == PET_ANIM_PLAY ? sinf(at * 3.5f) * 4.0f : 0);
+    float bx = W / 2.0f + (anim == PET_ANIM_PLAY ? sinf(at * 3.5f) * 4.0f * A : 0);
     float by = FLOOR_Y - leg_h - bry * 0.9f - bounce;
     float ca = cosf(tilt), sa = sinf(tilt);
-    /* Points on the body: front-top (neck base), rear (tail base), underside. */
-    float fx = bx + brx * 0.75f * ca - (-bry * 0.45f) * sa * 0, fy = by - bry * 0.45f + brx * 0.75f * sa;
+    /* Points on the body: front-top (neck base), rear (tail base). */
+    float fx = bx + brx * 0.75f * ca, fy = by - bry * 0.45f + brx * 0.75f * sa;
     float rxp = bx - brx * 0.85f * ca, ryp = by + bry * 0.1f - brx * 0.85f * sa;
 
-    /* The tail: a chain of discs from the rear, curving up and back. */
-    float tail_len = (10.0f + g->tail_len / 255.0f * 14.0f) * k * (v->stage == PET_KID ? 0.6f : 1.0f);
+    /* The tail: a chain of capsules from the rear, curving up and back. */
+    float tail_len = (7.0f + g->tail_len / 255.0f * 9.0f) * k * (v->stage == PET_KID ? 0.6f : 1.0f);
     if (v->stage == PET_KID) {
-        tail_len = fmaxf_(tail_len, 5.0f);
+        tail_len = fmaxf_(tail_len, 5.0f * A);
     }
     int segs = 7;
     float sway = sinf(t * 2.3f) * (f->asleep ? 0.3f : 1.0f);
@@ -716,38 +789,39 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         float step = tail_len / segs;
         tx -= cosf(ang) * step;
         ty -= sinf(ang) * step * (g->species == PET_SP_ANKYLO ? 0.35f : g->species == PET_SP_SAUROPOD ? 0.5f : 0.8f);
-        float r = tr0 * (1.0f - u * 0.8f) + 0.8f;
+        float r = tr0 * (1.0f - u * 0.8f) + 0.8f * A;
         capsule(last_tx, last_ty, tx, ty, r, C_BASE, true);
         last_tx = tx;
         last_ty = ty;
     }
     if (v->stage >= PET_TEEN) {
         switch (g->tail_tip) {
-        case 1: ellipse(tx, ty, 3.2f * k + 1, 2.8f * k + 1, C_SEC, true); break;
+        case 1: ellipse(tx, ty, 3.2f * k + A, 2.8f * k + A, C_SEC, true); break;
         case 2:
-            spike(tx, ty, -0.6f, -1, 5.0f * k + 1, 3.0f, C_SEC, true);
-            spike(tx + 2.5f, ty + 1, -0.2f, -1, 4.0f * k + 1, 2.5f, C_SEC, true);
+            spike(tx, ty, -0.6f, -1, 5.0f * k + A, 3.0f * A, C_SEC, true);
+            spike(tx + 2.5f * A, ty + A, -0.2f, -1, 4.0f * k + A, 2.5f * A, C_SEC, true);
             break;
-        case 3: ellipse(tx - 1, ty - 1, 3.0f * k + 1, 2.0f * k + 1, C_SEC, true); break;
+        case 3: ellipse(tx - A, ty - A, 3.0f * k + A, 2.0f * k + A, C_SEC, true); break;
         default: break;
         }
     }
 
     /* The far legs, and the far wing. */
-    float leg_r = (biped ? 2.4f : 2.0f) * k * body_k + 0.6f;
+    float leg_r = (biped ? 2.4f : 2.0f) * k * body_k + 0.6f * A;
     float foot_y = FLOOR_Y - bounce;
     float hip_x = biped ? bx - brx * 0.1f : bx - brx * 0.55f, front_x = bx + brx * 0.55f;
+    float foot_rx = leg_r * 1.6f + 0.5f * A, foot_ry = 1.5f * A;
     if (ptero) {
         float flap = f->asleep ? 0.2f : (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? sinf(t * 14.0f) : sinf(t * 5.0f) * 0.6f;
-        float wl = 16.0f * k + 4;
+        float wl = 16.0f * k + 4 * A;
         tri(bx - brx * 0.2f, by - bry * 0.4f, bx - brx * 0.2f - wl * 0.9f, by - bry * 0.4f - wl * (0.5f + flap * 0.5f), bx - brx * 0.9f, by,
             C_SEC, true);
     }
-    capsule(hip_x + 1.5f, by + bry * 0.3f, hip_x + 1.5f + walk * 2, foot_y - 1.5f, leg_r, C_DARK, true);
-    ellipse(hip_x + 3.0f + walk * 2, foot_y - 1.2f, leg_r * 1.5f + 0.5f, 1.4f, C_DARK, true);
+    capsule(hip_x + 1.5f * A, by + bry * 0.3f, hip_x + 1.5f * A + walk * 2 * A, foot_y - foot_ry, leg_r, C_DARK, true);
+    ellipse(hip_x + 3.0f * A + walk * 2 * A, foot_y - foot_ry * 0.8f, foot_rx, foot_ry, C_DARK, true);
     if (!biped) {
-        capsule(front_x + 1.5f, by + bry * 0.3f, front_x + 1.5f - walk * 2, foot_y - 1.5f, leg_r, C_DARK, true);
-        ellipse(front_x + 3.0f - walk * 2, foot_y - 1.2f, leg_r * 1.5f + 0.5f, 1.4f, C_DARK, true);
+        capsule(front_x + 1.5f * A, by + bry * 0.3f, front_x + 1.5f * A - walk * 2 * A, foot_y - foot_ry, leg_r, C_DARK, true);
+        ellipse(front_x + 3.0f * A - walk * 2 * A, foot_y - foot_ry * 0.8f, foot_rx, foot_ry, C_DARK, true);
     }
 
     /* The body itself, with its back features on top. */
@@ -756,33 +830,31 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
         int nb = v->stage == PET_TEEN ? 4 : 6;
         for (int i = 0; i < nb; i++) {
             float u = -0.7f + 1.3f * i / (nb - 1);
-            /* A point on the body's top edge. */
-            float ox = bx + u * brx * ca - (-bry) * sa, oy = by - bry * ca + u * brx * sa;
-            float nx = -sa * 0 + sinf(tilt) * 0, ny = -1;
-            (void)nx;
+            float ox = bx + u * brx * ca + bry * sa, oy = by - bry * ca + u * brx * sa;
             switch (g->back) {
-            case 1: spike(ox, oy + 1, 0.15f, ny, 4.5f * k + 1, 2.6f, C_SEC, true); break;
+            case 1: spike(ox, oy + A, 0.15f, -1, 4.5f * k + A, 2.6f * A, C_SEC, true); break;
             case 2: {
-                float h = (4.0f + 3.0f * sinf(u * 2.0f + 1.6f)) * k + 1;
-                tri(ox - 2.2f, oy + 1, ox + 2.2f, oy + 1, ox + 0.3f, oy - h, C_SEC, true);
+                float h = (4.0f + 3.0f * sinf(u * 2.0f + 1.6f)) * k + A;
+                tri(ox - 2.2f * A, oy + A, ox + 2.2f * A, oy + A, ox + 0.3f * A, oy - h, C_SEC, true);
                 break;
             }
             case 3: {
-                float h = (7.0f + 5.0f * cosf(u * 1.8f)) * k + 1;
-                tri(ox - 2.5f, oy + 1, ox + 2.5f, oy + 1, ox, oy - h, C_SEC, true);
+                float h = (7.0f + 5.0f * cosf(u * 1.8f)) * k + A;
+                tri(ox - 2.5f * A, oy + A, ox + 2.5f * A, oy + A, ox, oy - h, C_SEC, true);
                 break;
             }
-            case 4: ellipse(ox, oy + 0.5f, 1.8f, 1.5f, C_SEC, true); break;
+            case 4: ellipse(ox, oy + 0.5f * A, 1.8f * A, 1.5f * A, C_SEC, true); break;
             default: break;
             }
         }
     }
     /* The belly. */
-    ellipse_rot(bx + brx * 0.15f, by + bry * 0.35f, brx * 0.62f, bry * 0.5f, tilt, C_BELLY, true);
+    float bex = bx + brx * 0.15f, bey = by + bry * 0.35f, berx = brx * 0.62f, bery = bry * 0.5f;
+    ellipse_rot(bex, bey, berx, bery, tilt, C_BELLY, true);
 
     /* The neck and head. */
     float neck_len = (3.0f + g->neck / 255.0f * 16.0f) * k * (v->stage == PET_KID ? 0.5f : 1.0f);
-    float neck_r = (bry * 0.45f) * (g->species == PET_SP_SAUROPOD ? 0.7f : 1.0f) + 0.5f;
+    float neck_r = (bry * 0.45f) * (g->species == PET_SP_SAUROPOD ? 0.7f : 1.0f) + 0.5f * A;
     float nang = g->species == PET_SP_SAUROPOD ? -1.2f : biped ? -0.9f : -0.6f;   /* up and forward */
     if (f->asleep) {
         nang += 0.5f;
@@ -790,10 +862,12 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     if (f->eating) {
         nang += 0.25f + (sinf(at * 9.0f) > 0 ? 0.1f : 0);
     }
-    float hx = fx + cosf(nang) * neck_len, hy = fy + sinf(nang) * neck_len - 0.5f * breath * 0.3f;
+    float hx = fx + cosf(nang) * neck_len, hy = fy + sinf(nang) * neck_len - 0.3f * breath * A;
     float hrx = (g->species == PET_SP_SAUROPOD ? 4.0f : g->species == PET_SP_CERATOPS ? 7.5f : 6.0f) * k * head_k;
     float hry = hrx * (g->species == PET_SP_RAPTOR || g->species == PET_SP_PTERO ? 0.62f : 0.78f);
     capsule(fx, fy, hx, hy, neck_r, C_BASE, true);
+    /* The throat, cream like the belly. */
+    capsule(fx + neck_r * 0.3f, fy + neck_r * 0.5f, hx + hrx * 0.2f, hy + hry * 0.5f, neck_r * 0.45f, C_BELLY, true);
     if (g->crest == 4 && v->stage >= PET_TEEN) {   /* the frill, behind the head */
         ellipse(hx - hrx * 0.5f, hy - hry * 0.3f, hrx * 1.15f, hry * 1.35f, C_SEC, true);
         ellipse(hx - hrx * 0.5f, hy - hry * 0.3f, hrx * 0.85f, hry * 1.0f, C_BASE, true);
@@ -802,60 +876,65 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
     /* The snout and jaw. */
     float sx = hx + hrx * 0.75f, sy = hy + hry * 0.15f;
     float srx = hrx * (g->jaw == 1 ? 0.95f : 0.6f), sry = hry * 0.55f;
-    float open = f->talking ? 0.8f + f->level * 2.2f : f->eating ? (sinf(at * 9.0f) > 0 ? 2.2f : 0) : (anim == PET_ANIM_HAPPY ? 0.8f : 0);
+    float open = f->talking ? (0.8f + f->level * 2.2f) * A : f->eating ? (sinf(at * 9.0f) > 0 ? 2.2f * A : 0) : (anim == PET_ANIM_HAPPY ? 0.8f * A : 0);
     if (f->asleep) {
         open = 0;
     }
     if (g->jaw == 2) {
-        /* A beak: upper and lower, in the second colour. */
-        tri(sx - srx * 0.4f, sy - sry, sx + srx * 1.3f, sy + 0.5f, sx - srx * 0.4f, sy + sry * 0.4f, C_STAR, true);
+        /* A beak: upper and lower. */
+        tri(sx - srx * 0.4f, sy - sry, sx + srx * 1.3f, sy + 0.5f * A, sx - srx * 0.4f, sy + sry * 0.4f, C_STAR, true);
         tri(sx - srx * 0.4f, sy + sry * 0.2f + open, sx + srx * 1.0f, sy + sry * 0.4f + open, sx - srx * 0.4f, sy + sry * 1.1f + open,
             C_STAR, true);
     } else {
         ellipse(sx, sy, srx, sry, C_BASE, true);   /* the upper jaw */
-        ellipse(sx - srx * 0.15f, sy + sry * 0.75f + open, srx * 0.85f, sry * 0.5f + 0.4f, C_BASE, true);   /* the lower jaw */
+        ellipse(sx - srx * 0.15f, sy + sry * 0.75f + open, srx * 0.85f, sry * 0.5f + 0.4f * A, C_BASE, true);   /* the lower jaw */
     }
     /* Head crest. */
     float top = hy - hry;
     if (v->stage >= PET_TEEN) {
         switch (g->crest) {
-        case 1: spike(sx + srx * 0.2f, sy - sry + 1, 0.2f, -1, 5.0f * k + 1, 3.0f, C_SEC, true); break;
+        case 1: spike(sx + srx * 0.2f, sy - sry + A, 0.2f, -1, 5.0f * k + A, 3.0f * A, C_SEC, true); break;
         case 2:
-            spike(hx + hrx * 0.1f, top + 1.5f, 0.35f, -1, 6.0f * k + 1, 3.0f, C_SEC, true);
-            spike(hx + hrx * 0.5f, top + 2.5f, 0.45f, -1, 5.0f * k + 1, 2.6f, C_SEC, true);
+            spike(hx + hrx * 0.1f, top + 1.5f * A, 0.35f, -1, 6.0f * k + A, 3.0f * A, C_SEC, true);
+            spike(hx + hrx * 0.5f, top + 2.5f * A, 0.45f, -1, 5.0f * k + A, 2.6f * A, C_SEC, true);
             break;
         case 3:
             for (int i = 0; i < 3; i++) {
-                spike(hx - hrx * 0.5f + i * hrx * 0.35f, top + 1.5f + i * 0.5f, -0.7f + i * 0.25f, -1, 6.0f * k + 1 - i * 0.6f, 2.8f,
-                      C_SEC, true);
+                spike(hx - hrx * 0.5f + i * hrx * 0.35f, top + 1.5f * A + i * 0.5f * A, -0.7f + i * 0.25f, -1, 6.0f * k + A - i * 0.6f * A,
+                      2.8f * A, C_SEC, true);
             }
             break;
         case 4:
-            spike(hx + hrx * 0.25f, top + 1.5f, 0.3f, -1, 6.0f * k + 1, 2.8f, C_SEC, true);
-            spike(sx + srx * 0.2f, sy - sry + 1, 0.2f, -1, 3.5f * k + 1, 2.4f, C_SEC, true);
+            spike(hx + hrx * 0.25f, top + 1.5f * A, 0.3f, -1, 6.0f * k + A, 2.8f * A, C_SEC, true);
+            spike(sx + srx * 0.2f, sy - sry + A, 0.2f, -1, 3.5f * k + A, 2.4f * A, C_SEC, true);
             break;
-        case 5: spike(hx - hrx * 0.4f, top + 1.5f, -0.85f, -0.5f, 10.0f * k + 2, 4.0f, C_SEC, true); break;
+        case 5: spike(hx - hrx * 0.4f, top + 1.5f * A, -0.85f, -0.5f, 10.0f * k + 2 * A, 4.0f * A, C_SEC, true); break;
         default: break;
         }
     }
     /* The near legs, the arms, the near wing. */
-    capsule(hip_x - 1.5f, by + bry * 0.3f, hip_x - 1.5f - walk * 2, foot_y - 1.5f, leg_r, C_BASE, true);
-    ellipse(hip_x + 0.5f - walk * 2, foot_y - 1.2f, leg_r * 1.6f + 0.5f, 1.5f, C_BASE, true);
+    float near_hip = hip_x - 1.5f * A - walk * 2 * A, near_front = front_x - 1.5f * A + walk * 2 * A;
+    capsule(hip_x - 1.5f * A, by + bry * 0.3f, near_hip, foot_y - foot_ry, leg_r, C_BASE, true);
+    ellipse(near_hip + 2.0f * A, foot_y - foot_ry * 0.8f, foot_rx, foot_ry, C_BASE, true);
     if (!biped) {
-        capsule(front_x - 1.5f, by + bry * 0.3f, front_x - 1.5f + walk * 2, foot_y - 1.5f, leg_r, C_BASE, true);
-        ellipse(front_x + 0.5f + walk * 2, foot_y - 1.2f, leg_r * 1.6f + 0.5f, 1.5f, C_BASE, true);
-    } else if (!ptero) {
+        capsule(front_x - 1.5f * A, by + bry * 0.3f, near_front, foot_y - foot_ry, leg_r, C_BASE, true);
+        ellipse(near_front + 2.0f * A, foot_y - foot_ry * 0.8f, foot_rx, foot_ry, C_BASE, true);
+    }
+    float arm_x = 0, arm_y = 0;
+    if (biped && !ptero) {
         float raise = (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? -3.0f * k : 0;
         float ax = bx + brx * 0.55f, ay = by - bry * 0.1f;
-        capsule(ax, ay, ax + 3.0f * k + 1.5f, ay + 3.0f * k + 1 + raise, 1.4f * k + 0.5f, C_BASE, true);
-    } else {
+        arm_x = ax + 3.0f * k + 1.5f * A;
+        arm_y = ay + 3.0f * k + A + raise;
+        capsule(ax, ay, arm_x, arm_y, 1.4f * k + 0.5f * A, C_BASE, true);
+    } else if (ptero) {
         float flap = f->asleep ? 0.2f : (anim == PET_ANIM_HAPPY || anim == PET_ANIM_PLAY) ? sinf(t * 14.0f) : sinf(t * 5.0f) * 0.6f;
-        float wl = 15.0f * k + 4;
+        float wl = 15.0f * k + 4 * A;
         tri(bx + brx * 0.1f, by - bry * 0.3f, bx + brx * 0.1f - wl * 0.7f, by - bry * 0.3f - wl * (0.45f + flap * 0.5f), bx - brx * 0.6f,
             by + bry * 0.4f, C_SEC, true);
     }
 
-    /* Markings, then the outline round everything. */
+    /* Markings, then the outline round everything and the light on each part. */
     if (v->stage >= PET_ADULT && g->pattern) {
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
@@ -865,7 +944,7 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
                 float dx = x + 0.5f - bx, dy = y + 0.5f - by;
                 float u = (dx * ca + dy * sa) / brx, vv = (-dx * sa + dy * ca) / bry;
                 bool on_body = u * u + vv * vv <= 0.85f;
-                bool on_tail = x < bx - brx * 0.6f && y < FLOOR_Y - leg_h + 2;
+                bool on_tail = x < bx - brx * 0.6f && y < FLOOR_Y - leg_h + 2 * A;
                 if (!on_body && !on_tail) {
                     continue;
                 }
@@ -874,22 +953,38 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
                         uint32_t hsh = hash(g->seed, kx);
                         float spx = bx + ((hsh & 0xff) / 255.0f - 0.5f) * (brx * 2.4f) - brx * 0.3f;
                         float spy = by + (((hsh >> 8) & 0xff) / 255.0f - 0.5f) * (bry * 1.6f) - bry * 0.2f;
-                        float r = 1.3f + ((hsh >> 16) & 0x3) * 0.4f;
+                        float r = (1.3f + ((hsh >> 16) & 0x3) * 0.4f) * A;
                         if ((x + 0.5f - spx) * (x + 0.5f - spx) + (y + 0.5f - spy) * (y + 0.5f - spy) <= r * r) {
                             s_fb[y * W + x] = C_SEC;
                         }
                     }
-                } else if (((int)floorf((x + 0.5f - bx + (y - by) * 0.3f) / 3.0f) & 1) == 0 && vv < 0.35f) {
+                } else if (((int)floorf((x + 0.5f - bx + (y - by) * 0.3f) / (3.0f * A)) & 1) == 0 && vv < 0.35f) {
                     s_fb[y * W + x] = C_SEC;
                 }
             }
         }
     }
     outline();
-    /* Claws and teeth, over the outline. */
-    px(iround(hip_x + 1.5f + leg_r * 1.6f - walk * 2), iround(foot_y - 1), C_WHITE);
+    rim_shade();
+    /* The belly's segments. */
+    for (int i = -1; i <= 1; i++) {
+        float yy = bey + i * bery * 0.45f;
+        for (int x = (int)floorf(bex - berx); x <= (int)ceilf(bex + berx); x++) {
+            int y = iround(yy + (x - bex) * sa);
+            if ((unsigned)x < W && (unsigned)y < H && (s_fb[y * W + x] == C_BELLY || s_fb[y * W + x] == C_BELLY_L)) {
+                s_fb[y * W + x] = C_BELLY_D;
+            }
+        }
+    }
+    /* Claws, over the outline. */
+    float claw = 2.6f * A;
+    spike(near_hip + 2.0f * A + foot_rx - 1, foot_y - foot_ry * 0.6f, 1, 0.35f, claw, 1.8f * A, C_WHITE, false);
+    spike(near_hip + 2.0f * A + foot_rx * 0.3f, foot_y - foot_ry * 0.2f, 0.6f, 0.9f, claw * 0.8f, 1.6f * A, C_WHITE, false);
     if (!biped) {
-        px(iround(front_x + 1.5f + leg_r * 1.6f + walk * 2), iround(foot_y - 1), C_WHITE);
+        spike(near_front + 2.0f * A + foot_rx - 1, foot_y - foot_ry * 0.6f, 1, 0.35f, claw, 1.8f * A, C_WHITE, false);
+    } else if (!ptero) {
+        spike(arm_x, arm_y, 0.8f, 0.6f, claw * 0.8f, 1.5f * A, C_WHITE, false);
+        spike(arm_x - 0.6f * A, arm_y + 0.8f * A, 0.3f, 1, claw * 0.7f, 1.4f * A, C_WHITE, false);
     }
     if (anim == PET_ANIM_EVOLVE && at < 2.2f) {
         if ((int)(at * 10) & 1) {
@@ -900,47 +995,49 @@ static void draw_dino(const pet_view_t *v, const face_t *f, figure_t *fig)
             }
         }
     } else {
-        if (g->jaw != 2 && (g->teeth || open > 0.5f)) {
-            int ty0 = iround(sy + sry * 0.35f);
-            if (open > 0.5f) {
-                ellipse(sx - srx * 0.1f, sy + sry * 0.4f + open * 0.5f, srx * 0.7f, open * 0.45f + 0.5f, C_MOUTH, false);
-                if (open > 1.5f) {
-                    px(iround(sx - srx * 0.3f), iround(sy + sry * 0.4f + open * 0.8f), C_TONGUE);
+        /* The mouth line, the nostril, teeth. */
+        if (g->jaw != 2) {
+            float mly = sy + sry * 0.4f;
+            if (open > 0.5f * A) {
+                ellipse(sx - srx * 0.1f, sy + sry * 0.4f + open * 0.5f, srx * 0.7f, open * 0.45f + 0.5f * A, C_MOUTH, false);
+                if (open > 1.5f * A) {
+                    ellipse(sx - srx * 0.3f, sy + sry * 0.4f + open * 0.8f, 1.6f, 1.2f, C_TONGUE, false);
                 }
+            } else {
+                line2(iround(sx - srx * 0.3f), iround(mly), iround(sx + srx * 0.85f), iround(mly), C_OUT, false);
             }
-            if (g->teeth && !f->asleep) {
-                int n = g->teeth == 2 ? 3 : 2;
+            if (g->teeth && !f->asleep && v->stage >= PET_KID) {
+                int n = g->teeth == 2 ? 4 : 3;
+                float tl = (g->teeth == 2 ? 3.2f : 2.2f) * A * (0.7f + 0.3f * k / ART);
                 for (int i = 0; i < n; i++) {
-                    int tx_ = iround(sx + srx * 0.7f - i * (srx * 0.6f / n) * 1.3f);
-                    px(tx_, ty0, C_WHITE);
-                    if (g->teeth == 2 && i == 0) {
-                        px(tx_, ty0 + 1, C_WHITE);
-                    }
+                    float txp = sx + srx * 0.8f - i * (srx * 1.0f / n);
+                    spike(txp, mly - 1, 0, 1, tl, 1.8f * A, C_WHITE, false);
                 }
             }
+            px2(iround(sx + srx * 0.75f), iround(sy - sry * 0.35f), C_OUT);   /* the nostril */
         }
         /* The eye(s). */
-        float er = clampf(g->eye_size * 0.42f * k * head_k * 1.3f, 1.3f, hry * 0.42f);
+        float er = clampf(g->eye_size * 0.42f * k * head_k * 1.3f, 1.3f * A, hry * 0.42f);
         if (f->listening) {
-            er += 0.5f;
+            er += 0.5f * A;
         }
         float ex = hx + hrx * 0.3f, ey = hy - hry * 0.15f;
         draw_eye(ex, ey, er, f);
-        if (g->eye_n >= 2 && hrx > 5) {
+        if (g->eye_n >= 2 && hrx > 5 * A) {
             draw_eye(hx - hrx * 0.45f, ey - hry * 0.1f, er * 0.75f, f);   /* the far eye, peeking round */
         }
         if (g->eye_n == 3) {
             draw_eye(hx, top + er * 1.1f, er * 0.7f, f);
         }
         if (f->arcs) {
-            px(iround(ex + er + 1), iround(ey + er), C_BLUSH);
+            ellipse(ex + er + 1.5f * A, ey + er, 1.8f, 1.3f, C_BLUSH, false);
         }
     }
     fig->hx = hx;
     fig->hy = hy;
     fig->hrx = hrx;
     fig->hry = hry;
-    fig->top = fminf_(top - (v->stage >= PET_TEEN && g->crest ? 6.0f * k + 1 : 0), by - bry - (v->stage >= PET_TEEN && g->back ? 8.0f * k : 0));
+    fig->top = fminf_(top - (v->stage >= PET_TEEN && g->crest ? 6.0f * k + A : 0), by - bry - (v->stage >= PET_TEEN && g->back ? 8.0f * k : 0));
     fig->right = sx + srx;
     fig->cx = bx;
 }
@@ -950,68 +1047,64 @@ static void draw_overlays(const pet_view_t *v, const face_t *f, const figure_t *
     const pet_genome_t *g = &v->g;
     pet_anim_t anim = v->anim;
     float t = f->t, at = f->at;
+    const float A = ART;
     if (f->asleep) {
         for (int i = 0; i < 3; i++) {
-            float ph = fmodf(t * 3.5f + i * 5.0f, 15.0f);
-            draw_z(iround(fig->hx + fig->hrx + 3 + i * 4 + ph * 0.3f), iround(fig->hy - fig->hry - 2 - ph), C_ZZ);
+            float ph = fmodf(t * 3.5f + i * 5.0f, 15.0f) * A;
+            draw_z(iround(fig->hx + fig->hrx + 3 * A + i * 4 * A + ph * 0.3f), iround(fig->hy - fig->hry - 2 * A - ph), C_ZZ);
         }
     }
     if (anim == PET_ANIM_HAPPY || (anim == PET_ANIM_IDLE && v->mood == PET_MOOD_HAPPY && fmodf(t, 9.0f) < 1.5f)) {
         for (int i = 0; i < 2; i++) {
-            float ph = fmodf(at * 10.0f + i * 7.0f, 16.0f);
-            draw_heart(iround(fig->hx - fig->hrx - 6 + i * (2 * fig->hrx + 8)), iround(fig->top - 3 - ph), C_HEART);
+            float ph = fmodf(at * 10.0f + i * 7.0f, 16.0f) * A;
+            draw_heart(iround(fig->hx - fig->hrx - 6 * A + i * (2 * fig->hrx + 8 * A)), iround(fig->top - 3 * A - ph), C_HEART);
         }
     }
     if (anim == PET_ANIM_SAD && !f->asleep) {
-        float ph = fmodf(at * 6.0f, 6.0f);
-        px(iround(fig->hx + fig->hrx * 0.3f + 2), iround(fig->hy + ph), C_DROP);
-        px(iround(fig->hx + fig->hrx * 0.3f + 2), iround(fig->hy + ph + 1), C_DROP);
+        float ph = fmodf(at * 6.0f, 6.0f) * A;
+        ellipse(fig->hx + fig->hrx * 0.3f + 2 * A, fig->hy + ph, 1.5f, 2.2f, C_DROP, false);
         if (v->mood == PET_MOOD_HUNGRY && fmodf(t, 1.0f) < 0.6f) {
-            draw_bang(iround(fig->hx), iround(fig->top - 9), C_STAR);
+            draw_bang(iround(fig->hx), iround(fig->top - 9 * A), C_STAR);
         }
     }
     if ((v->sick || anim == PET_ANIM_SICK) && !f->asleep) {
-        float ph = fmodf(t * 2.0f, 5.0f);
-        int sx = iround(fig->hx - fig->hrx - 2), sy = iround(fig->hy - fig->hry * 0.5f + ph);
-        px(sx, sy, C_DROP);
-        px(sx, sy + 1, C_DROP);
-        px(sx + 1, sy + 1, C_DROP);
+        float ph = fmodf(t * 2.0f, 5.0f) * A;
+        ellipse(fig->hx - fig->hrx - 2 * A, fig->hy - fig->hry * 0.5f + ph, 1.6f, 2.4f, C_DROP, false);
     }
     if (v->needs[PET_NEED_CLEAN] < 30 && anim != PET_ANIM_CLEAN) {
         for (int i = 0; i < 4; i++) {
             uint32_t hsh = hash(g->seed, 300 + i);
-            px(iround(fig->cx + ((hsh & 0xff) / 255.0f - 0.5f) * 14), iround(FLOOR_Y - 8 - (((hsh >> 8) & 0xff) / 255.0f) * 8), C_POOP);
+            px2(iround(fig->cx + ((hsh & 0xff) / 255.0f - 0.5f) * 14 * A), iround(FLOOR_Y - 8 * A - (((hsh >> 8) & 0xff) / 255.0f) * 8 * A), C_POOP);
         }
     }
     if (anim == PET_ANIM_EAT) {
         float left = clampf(1.0f - at / 3.0f, 0, 1);
-        float fr = 1.0f + 3.0f * left;
-        float fx = fig->right + 2 + fr, fy = fig->hy + fig->hry * 0.3f;
+        float fr = (1.0f + 3.0f * left) * A;
+        float fx = fig->right + 2 * A + fr, fy = fig->hy + fig->hry * 0.3f;
         ellipse(fx, fy, fr, fr, C_FOOD, false);
-        px(iround(fx), iround(fy - fr) - 1, C_FOOD2);
-        px(iround(fx + 1), iround(fy - fr) - 1, C_FOOD2);
+        ellipse(fx - fr * 0.35f, fy - fr * 0.35f, fr * 0.25f, fr * 0.2f, C_WHITE, false);
+        ellipse(fx + 1.5f, fy - fr - 1.5f, 2.2f, 1.4f, C_FOOD2, false);
     }
     if (anim == PET_ANIM_CLEAN) {
         for (int i = 0; i < 7; i++) {
             uint32_t hsh = hash(g->seed, 400 + i);
-            float ph = fmodf(at * 8.0f + (hsh & 0xf), 20.0f);
-            float bx = fig->cx + ((hsh & 0xff) / 255.0f - 0.5f) * 40, by = FLOOR_Y - ph - ((hsh >> 8) & 0x7);
-            px(iround(bx), iround(by - 1), C_DROP);
-            px(iround(bx - 1), iround(by), C_DROP);
-            px(iround(bx + 1), iround(by), C_DROP);
-            px(iround(bx), iround(by + 1), C_DROP);
+            float ph = fmodf(at * 8.0f + (hsh & 0xf), 20.0f) * A;
+            float bx = fig->cx + ((hsh & 0xff) / 255.0f - 0.5f) * 40 * A, by = FLOOR_Y - ph - ((hsh >> 8) & 0x7) * A;
+            float r = 1.5f * A;
+            ellipse(bx, by, r, r, C_DROP, false);
+            ellipse(bx, by, r - 1.5f, r - 1.5f, C_BG, false);
         }
     }
     if (anim == PET_ANIM_PLAY) {
-        float ph = fmodf(at * 6.0f, 10.0f);
-        draw_note(iround(fig->right + 2), iround(fig->top - 4 - ph), C_STAR);
+        float ph = fmodf(at * 6.0f, 10.0f) * A;
+        draw_note(iround(fig->right + 2 * A), iround(fig->top - 4 * A - ph), C_STAR);
     }
     if (anim == PET_ANIM_HATCH || anim == PET_ANIM_EVOLVE || (anim == PET_ANIM_PLAY && at < 1.0f)) {
         for (int i = 0; i < 8; i++) {
             uint32_t hsh = hash(g->seed, 500 + i);
             float ph = fmodf(at * 5.0f + (hsh & 0xf), 7.0f) / 7.0f;
             float a = (hsh >> 4 & 0xff) / 255.0f * TAU;
-            float rr = 18.0f * (0.6f + ph * 0.8f);
+            float rr = 18.0f * A * (0.6f + ph * 0.8f);
             if (((int)(at * 8 + i) & 1) == 0) {
                 draw_star(iround(fig->cx + cosf(a) * rr), iround((fig->top + FLOOR_Y) * 0.5f + sinf(a) * rr * 0.8f), C_STAR);
             }
@@ -1020,12 +1113,13 @@ static void draw_overlays(const pet_view_t *v, const face_t *f, const figure_t *
     if (f->thinking) {
         for (int i = 0; i < 3; i++) {
             if (fmodf(t * 2.0f, 3.0f) >= i) {
-                ellipse(fig->hx + fig->hrx * 0.5f + i * 4, fig->top - 4 - i * 3, 1.0f + i * 0.4f, 1.0f + i * 0.4f, C_WHITE, false);
+                float r = (1.0f + i * 0.4f) * A;
+                ellipse(fig->hx + fig->hrx * 0.5f + i * 4 * A, fig->top - 4 * A - i * 3 * A, r, r, C_WHITE, false);
             }
         }
     }
     if (f->listening) {
-        draw_question(iround(fig->hx + fig->hrx * 0.6f + 2), iround(fig->top - 9), C_STAR);
+        draw_question(iround(fig->hx + fig->hrx * 0.6f + 2 * A), iround(fig->top - 9 * A), C_STAR);
     }
     draw_poops(v->poops);
 }
@@ -1046,8 +1140,8 @@ void muse_pixel_render(const muse_pose_t *p)
         draw_egg(&s_v, s_v.anim == PET_ANIM_HATCH ? s_v.anim_t : p->t);
         if (s_v.anim == PET_ANIM_LEAVE) {
             for (int i = 0; i < 6; i++) {
-                float ph = fmodf(s_v.anim_t * 4.0f + i * 3.0f, 20.0f);
-                draw_star(10 + i * 9, FLOOR_Y - 20 - iround(ph), C_STAR);
+                float ph = fmodf(s_v.anim_t * 4.0f + i * 3.0f, 20.0f) * ART;
+                draw_star(iround(10 * ART + i * 9 * ART), iround(FLOOR_Y - 20 * ART - ph), C_STAR);
             }
         }
         return;
@@ -1058,7 +1152,7 @@ void muse_pixel_render(const muse_pose_t *p)
     if (s_v.stage == PET_BABY) {
         draw_blob(&s_v, &f, &fig);
     } else {
-        ellipse(29.0f, FLOOR_Y + 1.5f, 16.0f, 1.8f, C_SHADOW, false);
+        ellipse(W / 2.0f, FLOOR_Y + 1.5f * ART, 16.0f * ART, 1.8f * ART, C_SHADOW, false);
         draw_dino(&s_v, &f, &fig);
     }
     draw_overlays(&s_v, &f, &fig);
