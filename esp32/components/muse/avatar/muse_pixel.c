@@ -87,6 +87,8 @@ enum {
     C_CLOUD,
     C_SUN,
     C_MOON,
+    C_CLOUD_D,
+    C_RAIN,
     C_COUNT
 };
 
@@ -178,16 +180,18 @@ static void build_palette_bank(uint16_t *s_pal, const pet_view_t *v)
     s_pal[C_GLOW] = dark ? rgb565(255, 70, 70) : rgb565(120, 255, 255);
     /* The scene. */
     bool night = s_hour != 255 && (s_hour >= 20 || s_hour < 6);
-    s_pal[C_GROUND] = night ? rgb565(62, 44, 34) : rgb565(118, 80, 48);
-    s_pal[C_GROUND_D] = night ? rgb565(44, 30, 24) : rgb565(88, 58, 34);
-    s_pal[C_GRASS] = night ? rgb565(34, 90, 52) : rgb565(72, 170, 80);
-    s_pal[C_GRASS_D] = night ? rgb565(22, 62, 36) : rgb565(44, 122, 54);
+    s_pal[C_GROUND] = night ? rgb565(30, 78, 44) : rgb565(66, 158, 74);     /* grass */
+    s_pal[C_GROUND_D] = night ? rgb565(20, 56, 32) : rgb565(44, 118, 52);
+    s_pal[C_GRASS] = night ? rgb565(42, 100, 58) : rgb565(96, 196, 100);    /* the lighter verge */
+    s_pal[C_GRASS_D] = night ? rgb565(14, 42, 24) : rgb565(30, 92, 40);
     s_pal[C_MTN] = night ? rgb565(38, 42, 78) : rgb565(92, 102, 150);
     s_pal[C_MTN_D] = night ? rgb565(26, 28, 56) : rgb565(62, 70, 112);
     s_pal[C_HILL] = night ? rgb565(28, 70, 44) : rgb565(58, 136, 66);
     s_pal[C_CLOUD] = night ? rgb565(70, 78, 120) : rgb565(240, 244, 255);
     s_pal[C_SUN] = rgb565(255, 214, 70);
     s_pal[C_MOON] = rgb565(232, 234, 255);
+    s_pal[C_CLOUD_D] = night ? rgb565(44, 48, 72) : rgb565(132, 140, 160);
+    s_pal[C_RAIN] = night ? rgb565(110, 130, 190) : rgb565(170, 200, 240);
     s_ground = s_pal[C_GROUND];
 }
 
@@ -474,6 +478,31 @@ static void rim_shade(void)
 
 #define GROUND_Y 100   /* the horizon row: ground from here down */
 
+/* Blends two RGB565 colours. */
+static uint16_t blend565(uint16_t a, uint16_t b, float f)
+{
+    int ar = (a >> 11) << 3, ag = ((a >> 5) & 0x3f) << 2, ab = (a & 0x1f) << 3;
+    int br = (b >> 11) << 3, bg = ((b >> 5) & 0x3f) << 2, bb = (b & 0x1f) << 3;
+    return rgb565((int)(ar + (br - ar) * f), (int)(ag + (bg - ag) * f), (int)(ab + (bb - ab) * f));
+}
+
+#define WEATHER_SLOT_S 1200.0f
+
+/* The weather on a twenty-minute clock: a quarter of the slots rain, a quarter are overcast.
+ * Rain ramps in over the first minute and out over the last. Returns the rain, 0..1. */
+static float weather_rain(float t, bool *cloudy)
+{
+    int slot = (int)(t / WEATHER_SLOT_S);
+    uint32_t r = hash(0x7eafu, (uint32_t)slot) % 100;
+    *cloudy = r < 50;
+    if (r >= 25) {
+        return 0;
+    }
+    float in = t - slot * WEATHER_SLOT_S, left = WEATHER_SLOT_S - in;
+    float f = in < 60 ? in / 60 : left < 60 ? left / 60 : 1.0f;
+    return f < 0 ? 0 : f;
+}
+
 static uint16_t scene_sky_colour(int hour)
 {
     if (hour == 255) {
@@ -509,6 +538,8 @@ static void draw_scene(float t, int hour)
 {
     bool night = hour != 255 && (hour >= 20 || hour < 6);
     bool dusk = hour != 255 && !night && (hour < 8 || hour >= 18);
+    bool cloudy;
+    float rain = weather_rain(t, &cloudy);
     uint8_t bank = s_bank;
     s_bank = 0;
     /* Sun or moon. */
@@ -527,13 +558,16 @@ static void draw_scene(float t, int hour)
         ellipse(26, sy, 10, 10, C_SUN, false);
         ellipse(26, sy, 7, 7, dusk ? C_SUN : C_CLOUD, false);
     }
-    /* Clouds drift. */
-    for (int i = 0; i < 3; i++) {
+    /* Clouds drift; weather brings more of them, lower and darker. */
+    int nclouds = cloudy || rain > 0 ? 6 : 3;
+    for (int i = 0; i < nclouds; i++) {
         float cx = fmodf(t * (1.2f + i * 0.4f) + i * 47.0f, (float)(W + 40)) - 20.0f;
-        float cy = 14 + i * 13 + (i & 1) * 4;
-        ellipse(cx, cy, 9, 3.5f, C_CLOUD, false);
-        ellipse(cx - 5, cy + 1, 6, 3, C_CLOUD, false);
-        ellipse(cx + 5, cy + 1, 7, 3, C_CLOUD, false);
+        float cy = 14 + (i % 3) * 13 + (i & 1) * 4 + (i >= 3 ? 8 : 0);
+        uint8_t c = rain > 0 || (cloudy && i >= 2) ? C_CLOUD_D : C_CLOUD;
+        float big = cloudy || rain > 0 ? 1.4f : 1.0f;
+        ellipse(cx, cy, 9 * big, 3.5f * big, c, false);
+        ellipse(cx - 5 * big, cy + 1, 6 * big, 3 * big, c, false);
+        ellipse(cx + 5 * big, cy + 1, 7 * big, 3 * big, c, false);
     }
     /* Mountains, with the volcano smoking. */
     for (int x = 0; x < W; x++) {
@@ -559,12 +593,19 @@ static void draw_scene(float t, int hour)
             px(x, y, y < GROUND_Y - (int)hh + 2 ? C_GRASS : C_HILL);
         }
     }
-    /* The ground: dirt, a grass verge, pebbles and tufts. */
+    /* The ground: grass, a lighter verge at the horizon, darker flecks and blades. */
     for (int y = GROUND_Y; y < H; y++) {
         for (int x = 0; x < W; x++) {
             uint32_t hsh = hash(x, y);
-            uint8_t c = y < GROUND_Y + 3 ? ((hsh & 3) == 0 ? C_GRASS_D : C_GRASS) : ((hsh & 31) == 0 ? C_GROUND_D : C_GROUND);
+            uint8_t c = y == GROUND_Y ? C_GRASS_D : y < GROUND_Y + 3 ? ((hsh & 3) == 0 ? C_GROUND : C_GRASS)
+                                                                   : ((hsh & 15) == 0 ? C_GROUND_D : C_GROUND);
             px(x, y, c);
+        }
+    }
+    if (rain > 0.5f) {   /* puddles */
+        for (int i = 0; i < 3; i++) {
+            uint32_t hsh = hash(0x9ddu, i);
+            ellipse(12 + (hsh % 100), GROUND_Y + 8 + (hsh >> 8) % 14, 6 + (hsh >> 16) % 4, 1.6f, C_RAIN, false);
         }
     }
     for (int i = 0; i < 14; i++) {
@@ -673,16 +714,31 @@ static void draw_star(int x, int y, uint8_t c)
     px2(x, y + 2, c);
 }
 
-static void draw_poops(int n)
+/* The classic pile: three tiers, a thin black outline, a highlight, and wavy stink lines. */
+static void draw_poops(int n, float t)
 {
     for (int i = 0; i < n && i < 4; i++) {
         float x = (5 + i * 7 + (i & 1) * 2) * ART;
         float y = FLOOR_Y - 1 * ART;
+        uint8_t out = (uint8_t)(C_PUPIL + s_bank);
+        ellipse(x, y, 3 * ART + 1, 1.6f * ART + 1, out, false);
+        ellipse(x, y - 2 * ART, 2 * ART + 1, 1.4f * ART + 1, out, false);
+        ellipse(x, y - 4 * ART, 1.2f * ART + 1, 1.0f * ART + 1, out, false);
         ellipse(x, y, 3 * ART, 1.6f * ART, C_POOP, false);
         ellipse(x, y - 2 * ART, 2 * ART, 1.4f * ART, C_POOP, false);
         ellipse(x, y - 4 * ART, 1.2f * ART, 1.0f * ART, C_POOP, false);
-        px2(iround(x + 1 * ART), iround(y - 2 * ART), C_OUT);
         px2(iround(x - 1.5f * ART), iround(y - 2.5f * ART), C_BELLY_D);
+        px(iround(x - 0.5f * ART), iround(y - 4.5f * ART), C_BELLY_D);
+        for (int j = 0; j < 3; j++) {
+            float ph = fmodf(t * 5.0f + j * 2.0f, 6.0f);
+            for (int k = 0; k < 5; k++) {
+                if (((k + (int)(t * 5.0f) + j) & 1) == 0) {
+                    float xx = x + (j - 1) * 3.0f * ART + sinf(k * 1.4f + t * 5.0f + j) * 1.6f;
+                    float yy = y - 6.0f * ART - k * 2.4f - ph;
+                    px(iround(xx), iround(yy), C_CLOUD);
+                }
+            }
+        }
     }
 }
 
@@ -1336,7 +1392,24 @@ static void draw_overlays(const pet_view_t *v, const face_t *f, const figure_t *
     if (f->listening) {
         draw_question(iround(fig->hx + fig->hrx * 0.6f + 2 * A), iround(fig->top - 9 * A), C_STAR);
     }
-    draw_poops(v->poops);
+    draw_poops(v->poops, t);
+}
+
+/* Rain streaks over the whole scene. */
+static void draw_rain(float t)
+{
+    bool cloudy;
+    float rain = weather_rain(t, &cloudy);
+    int n = (int)(130 * rain);
+    for (int i = 0; i < n; i++) {
+        uint32_t hsh = hash(0x7a19u, i);
+        float speed = 90 + (hsh >> 8) % 50;
+        int x = hsh % W;
+        int y = (int)fmodf(t * speed + (hsh >> 16) % H, (float)(FLOOR_Y + 4));
+        px(x, y, C_RAIN);
+        px(x, y - 1, C_RAIN);
+        px(x + 1, y - 2, C_RAIN);
+    }
 }
 
 
@@ -1427,9 +1500,15 @@ void muse_pixel_render(const muse_pose_t *p)
 {
     pet_view(&s_v);
     s_hour = s_v.hour;
+    bool cloudy;
+    float rain = weather_rain(p->t, &cloudy);
     s_bg = scene_sky_colour(s_hour);
+    if (rain > 0 || cloudy) {
+        bool night = s_hour != 255 && (s_hour >= 20 || s_hour < 6);
+        s_bg = blend565(s_bg, night ? rgb565(18, 20, 36) : rgb565(118, 128, 150), cloudy && rain == 0 ? 0.4f : 0.35f + rain * 0.45f);
+    }
     uint32_t key = s_v.g.seed ^ (s_v.stage << 1) ^ (s_v.sick ? 0x80000000u : 0) ^ (s_v.battle ? s_v.enemy.seed * 31u + 7u : 0) ^
-                   ((uint32_t)s_hour << 24);
+                   ((uint32_t)s_hour << 24) ^ ((uint32_t)s_bg << 8);
     if (key != s_pal_key) {
         build_palette(&s_v);
         s_pal_key = key;
@@ -1445,10 +1524,12 @@ void muse_pixel_render(const muse_pose_t *p)
                 draw_star(iround(10 * ART + i * 9 * ART), iround(FLOOR_Y - 20 * ART - ph), C_STAR);
             }
         }
+        draw_rain(p->t);
         return;
     }
     if (s_v.battle && s_v.stage >= PET_KID) {
         render_battle(p);
+        draw_rain(p->t);
         return;
     }
     face_t f;
@@ -1461,6 +1542,7 @@ void muse_pixel_render(const muse_pose_t *p)
         draw_dino(&s_v, &f, &fig);
     }
     draw_overlays(&s_v, &f, &fig);
+    draw_rain(p->t);
 }
 
 #define MAP_MAX 512
